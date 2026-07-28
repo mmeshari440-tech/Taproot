@@ -1,0 +1,64 @@
+# Taproot dev stack (T-01). Keycloak + Vault are added in Sprint 1 (T-06, T-11).
+# `make dev` brings this up; `make db` starts just Postgres + Redis.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: taproot
+      POSTGRES_PASSWORD: taproot
+      POSTGRES_DB: taproot
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U taproot -d taproot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./apps/api
+    environment:
+      TAPROOT_ENV: development
+      TAPROOT_DATABASE_URL: postgresql+asyncpg://taproot:taproot@postgres:5432/taproot
+      TAPROOT_REDIS_URL: redis://redis:6379/0
+      TAPROOT_LOCAL_SECRET_KEY: dev-only-change-me
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: >
+      sh -c "uv run alembic upgrade head &&
+             uv run uvicorn taproot.main:app --host 0.0.0.0 --port 8000 --reload"
+
+  web:
+    build:
+      context: ./apps/web
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./apps/web:/app
+      - /app/node_modules
+    command: sh -c "pnpm install && pnpm dev --host 0.0.0.0"
+
+volumes:
+  pgdata:

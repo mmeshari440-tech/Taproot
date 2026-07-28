@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Adapted from the GitLab CI intent in TASKS.md T-02; see docs/adr/0001.
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apps/api/**'
+              - '.github/workflows/ci.yml'
+            web:
+              - 'apps/web/**'
+              - 'packages/**'
+              - '.github/workflows/ci.yml'
+
+  api:
+    needs: changes
+    if: ${{ needs.changes.outputs.api == 'true' }}
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: taproot
+          POSTGRES_PASSWORD: taproot
+          POSTGRES_DB: taproot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U taproot" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      TAPROOT_DATABASE_URL: postgresql+asyncpg://taproot:taproot@localhost:5432/taproot
+      TAPROOT_LOCAL_SECRET_KEY: ci-secret
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v3
+      - run: uv python install 3.12
+      - run: uv sync
+      - name: Lint (ruff)
+        run: uv run ruff check .
+      - name: Type-check (mypy --strict)
+        run: uv run mypy src
+      - name: Dependency direction (import-linter)
+        run: uv run lint-imports
+      - name: Migrations apply on Postgres
+        run: uv run alembic upgrade head
+      - name: Tests
+        run: uv run pytest
+
+  web:
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.9.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Type-check (tsc)
+        run: pnpm --filter @taproot/web typecheck
+      - name: Lint (eslint)
+        run: pnpm --filter @taproot/web lint
+      - name: Tests (vitest)
+        run: pnpm --filter @taproot/web test
+      - name: Build
+        run: pnpm --filter @taproot/web build
+
+  images:
+    needs: [api, web]
+    if: ${{ github.ref == 'refs/heads/main' && always() && !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build api image
+        run: docker build -t taproot/api apps/api
+      - name: Build web image
+        run: docker build -t taproot/web apps/web
