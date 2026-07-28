@@ -1,0 +1,17 @@
+{
+  "name": "taproot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "On-prem AI root-cause investigation across Elasticsearch, Sentry, and AppDynamics.",
+  "packageManager": "pnpm@10.9.0",
+  "scripts": {
+    "dev": "pnpm --filter @taproot/web dev",
+    "build": "pnpm --filter @taproot/web build",
+    "test": "pnpm --filter @taproot/web test",
+    "lint": "pnpm --filter @taproot/web lint",
+    "typecheck": "pnpm --filter @taproot/web typecheck"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
+  }
+}

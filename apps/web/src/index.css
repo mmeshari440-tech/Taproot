@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 140 30% 98%;
+    --foreground: 140 40% 8%;
+    --primary: 100 55% 20%;
+    --primary-foreground: 140 30% 98%;
+    --muted: 140 15% 92%;
+    --muted-foreground: 140 10% 40%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 140 15% 85%;
+    --input: 140 15% 85%;
+    --ring: 100 55% 20%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    --background: 140 25% 6%;
+    --foreground: 140 15% 92%;
+    --primary: 95 45% 55%;
+    --primary-foreground: 140 25% 6%;
+    --muted: 140 15% 14%;
+    --muted-foreground: 140 10% 60%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 140 15% 18%;
+    --input: 140 15% 18%;
+    --ring: 95 45% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+  }
+}

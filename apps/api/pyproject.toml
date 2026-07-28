@@ -1,0 +1,107 @@
+[project]
+name = "taproot-api"
+version = "0.1.0"
+description = "Taproot — on-prem AI root-cause investigation (API + agent worker)"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "sqlalchemy[asyncio]>=2.0.30",
+    "asyncpg>=0.29",
+    "alembic>=1.13",
+    "structlog>=24.1",
+    "cryptography>=42",
+    "hvac>=2.1",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+# OpenTelemetry is optional so the core install stays light; enable with `.[otel]`.
+otel = [
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-instrumentation-fastapi>=0.46b0",
+    "opentelemetry-exporter-otlp-proto-http>=1.25",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "aiosqlite>=0.20",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "import-linter>=2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/taproot"]
+
+# ---------------------------------------------------------------------------
+# Tooling
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "C4", "RUF"]
+# Docs intentionally use en-dashes (task ranges like "T-13–T-16", "reqs 1–5").
+ignore = ["RUF001", "RUF002", "RUF003"]
+# S101 (assert) is fine in tests; handled by per-file ignores.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106"]
+# Alembic autogenerates these; don't fight it on import order / line length.
+"src/taproot/db/migrations/**" = ["E501", "I001"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+exclude = ["src/taproot/db/migrations/"]
+
+[[tool.mypy.overrides]]
+module = ["hvac.*", "opentelemetry.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+# ---------------------------------------------------------------------------
+# Dependency-direction enforcement (ARCHITECTURE.md §3)
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "taproot"
+
+[[tool.importlinter.contracts]]
+name = "Layered architecture (api > services > agent > integrations > db > core)"
+type = "layers"
+layers = [
+    "taproot.api",
+    "taproot.services",
+    "taproot.agent",
+    "taproot.integrations",
+    "taproot.db",
+    "taproot.core",
+]
+
+[[tool.importlinter.contracts]]
+name = "agent and integrations must not import db"
+type = "forbidden"
+source_modules = ["taproot.agent", "taproot.integrations"]
+forbidden_modules = ["taproot.db"]
