@@ -1,0 +1,75 @@
+{
+  "realm": "taproot",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "accessTokenLifespan": 900,
+  "roles": {
+    "realm": [
+      { "name": "platform-admin", "description": "Creates projects, links GitLab groups, configures + validates integrations." },
+      { "name": "tech-user", "description": "Selects a project, runs investigations, views results/history." }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "taproot-web",
+      "name": "Taproot Web (SPA)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "protocol": "openid-connect",
+      "rootUrl": "http://localhost:5173",
+      "baseUrl": "http://localhost:5173",
+      "redirectUris": ["http://localhost:5173/*"],
+      "webOrigins": ["http://localhost:5173"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:5173/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "taproot-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "taproot-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "taproot-api",
+      "name": "Taproot API (resource server)",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+    {
+      "username": "admin@taproot.local",
+      "email": "admin@taproot.local",
+      "firstName": "Ada",
+      "lastName": "Admin",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
+      "realmRoles": ["platform-admin"]
+    },
+    {
+      "username": "tech@taproot.local",
+      "email": "tech@taproot.local",
+      "firstName": "Tom",
+      "lastName": "Tech",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [{ "type": "password", "value": "tech", "temporary": false }],
+      "realmRoles": ["tech-user"]
+    }
+  ]
+}

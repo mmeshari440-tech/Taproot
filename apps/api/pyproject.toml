@@ -16,6 +16,8 @@ dependencies = [
     "cryptography>=42",
     "hvac>=2.1",
     "httpx>=0.27",
+    "python-jose[cryptography]>=3.3",
+    "redis>=5.0",
 ]
 
 [project.optional-dependencies]
@@ -57,6 +59,10 @@ select = ["E", "F", "I", "UP", "B", "ASYNC", "S", "C4", "RUF"]
 ignore = ["RUF001", "RUF002", "RUF003"]
 # S101 (assert) is fine in tests; handled by per-file ignores.
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom relies on calls in argument defaults.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.security.HTTPBearer"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106"]
 # Alembic autogenerates these; don't fight it on import order / line length.
@@ -69,7 +75,7 @@ plugins = ["pydantic.mypy"]
 exclude = ["src/taproot/db/migrations/"]
 
 [[tool.mypy.overrides]]
-module = ["hvac.*", "opentelemetry.*"]
+module = ["hvac.*", "opentelemetry.*", "jose.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

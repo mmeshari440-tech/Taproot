@@ -35,8 +35,32 @@ The API serves `http://localhost:8000` (`GET /health`), the web app
 - **Migrations fail to connect** — ensure `make db` is up and healthy
   (`docker compose ps`).
 
+## Keycloak (T-06)
+
+`make dev` starts Keycloak at `http://localhost:8080` and auto-imports
+`infra/keycloak/realm-export.json` (`start-dev --import-realm`).
+
+| Item | Value |
+|---|---|
+| Realm | `taproot` |
+| Admin console | `http://localhost:8080` (admin / admin) |
+| Realm roles | `platform-admin`, `tech-user` |
+| SPA client | `taproot-web` — public, PKCE `S256`, redirect `http://localhost:5173/*` |
+| API audience | `taproot-api` — access tokens carry `aud: taproot-api` via an audience mapper on `taproot-web` |
+| OIDC discovery | `http://localhost:8080/realms/taproot/.well-known/openid-configuration` |
+| JWKS | `http://localhost:8080/realms/taproot/protocol/openid-connect/certs` |
+
+Test users (dev passwords — change for any shared environment):
+
+| Username | Password | Role |
+|---|---|---|
+| `admin@taproot.local` | `admin` | `platform-admin` |
+| `tech@taproot.local` | `tech` | `tech-user` |
+
+The backend validates tokens against this realm — see `TAPROOT_KEYCLOAK_*` in
+`.env.example` and `docs/ARCHITECTURE.md` §8.1.
+
 ## Coming in later sprints
 
-- Keycloak realm import + test users (T-06).
 - Vault setup for integration secrets (T-11).
 - Helm deploy, SSE ingress config, rollback procedure (T-34).
