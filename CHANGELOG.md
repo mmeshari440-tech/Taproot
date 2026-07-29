@@ -5,6 +5,20 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Sprint 1 — Auth & Admin (in progress)
+
+- **T-06 Keycloak realm & local instance**: `infra/keycloak/realm-export.json`
+  (realm `taproot`, roles `platform-admin`/`tech-user`, public PKCE SPA client
+  `taproot-web`, bearer-only `taproot-api` with an audience mapper, two test
+  users); Keycloak added to `docker-compose` with `--import-realm`; runbook
+  section; structural test guarding the export.
+- **T-07 Backend JWT auth & RBAC**: `core/security.py` — `TokenValidator`
+  (signature + `iss`/`aud`/`exp`), `RemoteJwksProvider` with cached JWKS
+  (`AsyncCache`: `RedisCache`/`InMemoryCache`) and refetch-on-unknown-`kid`;
+  `require_role()` dependency with strict 401-vs-403; user upsert on first
+  authenticated request; routes `GET /api/v1/me` and `GET /api/v1/admin/ping`.
+  Tested with locally-signed RSA fixture tokens.
+
 ### Sprint 0 — Foundations
 
 - **T-01 Monorepo scaffold**: pnpm workspace + `uv` project; `apps/web`

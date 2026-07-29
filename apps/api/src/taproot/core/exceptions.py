@@ -21,3 +21,17 @@ class ConfigurationError(TaprootError):
 class SecretStoreError(TaprootError):
     """Raised when a secret cannot be stored, retrieved, or when a store refuses
     to start in an environment it is not permitted to run in."""
+
+
+class AuthenticationError(TaprootError):
+    """Token missing, malformed, expired, or failing signature/claim checks.
+
+    Maps to HTTP 401 — the caller must (re-)authenticate (ARCHITECTURE.md §8.1).
+    """
+
+
+class AuthorizationError(TaprootError):
+    """Valid token, but the caller lacks the required role.
+
+    Maps to HTTP 403 — never conflate with 401 (ARCHITECTURE.md §8.1).
+    """
