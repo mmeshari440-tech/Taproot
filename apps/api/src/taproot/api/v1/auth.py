@@ -11,13 +11,11 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from taproot.api.v1.deps import get_current_user, get_principal, require_role
+from taproot.api.v1.deps import get_current_user, get_principal, require_admin
 from taproot.core.security import Principal
 from taproot.db.models import User
 
 router = APIRouter(tags=["auth"])
-
-require_admin = require_role("platform-admin")
 
 
 class UserOut(BaseModel):

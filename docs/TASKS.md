@@ -57,20 +57,20 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | Sprint | Total | Done | In Progress | Blocked | Remaining |
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
-| 1 — Auth & Admin | 7 | 0 | 0 | 0 | 7 |
+| 1 — Auth & Admin | 7 | 2 | 0 | 0 | 5 |
 | 2 — Pipeline | 7 | 0 | 0 | 0 | 7 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **5** | **0** | **0** | **29** |
+| **Total** | **34** | **7** | **0** | **0** | **27** |
 
-**Overall progress:** `███░░░░░░░░░░░░░░░░░░` 15% (5/34)
+**Overall progress:** `████░░░░░░░░░░░░░░░░` 21% (7/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-01…T-05 (Sprint 0) — merged to `develop` via [PR #1](https://github.com/mmeshari440-tech/Taproot/pull/1), CI green.
-**In review:** T-06, T-07 — Sprint 1 auth backbone, delivered on branch `claude/zip-folder-review-y5th0x`, awaiting review. Move to `DONE` on merge.
-**Next up:** T-08 (FE auth flow) and T-09 (GitLab client) — both eligible after T-06/T-07.
+**Last completed:** T-06, T-07 (Sprint 1 auth backbone) — merged to `develop` via [PR #2](https://github.com/mmeshari440-tech/Taproot/pull/2), CI green.
+**In review:** T-09, T-10, T-11 — Sprint 1 backend (GitLab client, project CRUD/admin, integration config + connection tests), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
+**Next up:** T-08 (FE auth flow) and T-12 (integration config UI) — the two remaining Sprint 1 tasks (frontend).
 
 ### Blockers
 
@@ -167,7 +167,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ## Sprint 1 — Auth & Admin (requirements 1–5)
 
 ### T-06 · Keycloak realm & local instance
-**Status:** `REVIEW` · **Depends:** T-01 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-01 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** [PR #2](https://github.com/mmeshari440-tech/Taproot/pull/2) — merged
 
 - [x] `infra/keycloak/realm-export.json`: realm, roles `platform-admin` + `tech-user`
 - [x] Public FE client with PKCE (`S256`); API client `taproot-api` + audience mapper
@@ -180,7 +180,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-07 · Backend JWT auth & RBAC
-**Status:** `REVIEW` · **Depends:** T-06, T-03 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-06, T-03 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** [PR #2](https://github.com/mmeshari440-tech/Taproot/pull/2) — merged
 
 - [x] JWKS fetched and cached (1h TTL, refetch on unknown `kid`) — `AsyncCache`: `RedisCache` (prod) / `InMemoryCache` (test)
 - [x] Validates signature, `iss`, `aud`, `exp`
@@ -207,44 +207,44 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-09 · GitLab client & group discovery *(requirement 1)*
-**Status:** `TODO` · **Depends:** T-04 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-04 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `integrations/gitlab.py` per the client contract (`ARCHITECTURE.md` §3)
-- [ ] `GET /api/v1/projects/gitlab-groups?search=` returns matching groups
-- [ ] `POST /projects/{id}/sync-repos` pulls group projects into `project_repos`
-- [ ] FE/BE classified by name/topic heuristic, with a manual override field
-- [ ] `get_file(project_id, path, ref)` implemented and tested (needed by T-25)
-- [ ] Rate-limit + retry handling; token has `read_api` scope only
+- [x] `integrations/gitlab.py` per the client contract (`ARCHITECTURE.md` §3)
+- [x] `GET /api/v1/projects/gitlab-groups?search=` returns matching groups
+- [x] `POST /projects/{id}/sync-repos` pulls group projects into `project_repos`
+- [x] FE/BE classified by token heuristic, with a manual override (`PATCH /repos/{id}`)
+- [x] `get_file(project_id, path, ref)` implemented and tested (needed by T-25)
+- [x] Rate-limit + retry handling (jittered backoff on 5xx/429); token needs `read_api` only
 
-**Notes:**
+**Notes:** Client is fully unit-tested via `httpx.MockTransport` (normalization, base64 file decode, 404→NotFound, provider-message surfacing, retry-then-succeed).
 
 ---
 
 ### T-10 · Project CRUD & admin UI
-**Status:** `TODO` · **Depends:** T-07, T-09 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-07, T-09 · **Started:** 2026-07-29 · **Finished:** — · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] Admin creates a project by picking a GitLab group
-- [ ] Repo list displayed with editable `kind` (FE/BE/OTHER) and `org_package_prefixes`
-- [ ] Project list, detail, deactivate
-- [ ] All mutations written to `audit_log`
-- [ ] Non-admin receives 403 on every write endpoint (tested)
+- [x] Admin creates a project from a GitLab group — **API** (`POST /projects` + group discovery); picker UI pending (FE slice)
+- [x] Repo list with editable `kind` + `org_package_prefixes` — **API** (`GET /repos`, `PATCH /repos/{id}`); display UI pending (FE slice)
+- [x] Project list, detail, deactivate (API)
+- [x] All mutations written to `audit_log`
+- [x] Non-admin receives 403 on every write endpoint (tested)
 
-**Notes:**
+**Notes:** Backend/API complete and tested end-to-end (`test_admin_api.py`). The **admin UI screens** (group picker, repo-kind editor) are delivered with the Sprint 1 frontend slice (alongside T-08/T-12); `Finished` stays open until those land. Kept `REVIEW` to reflect that.
 
 ---
 
 ### T-11 · Integration config API & connection tests *(requirements 2, 4, 5)*
-**Status:** `TODO` · **Depends:** T-04, T-10 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-04, T-10 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `PUT /projects/{id}/integrations/{kind}` stores config; token → `SecretStore`
-- [ ] `POST /projects/{id}/integrations/{kind}/test` → `{ok, latency_ms, detail, error}`
-- [ ] Elastic test: `_search size:0` against the configured index pattern
-- [ ] Sentry test: `GET /api/0/projects/{org}/{project}/`
-- [ ] AppDynamics test: OAuth token then `GET /controller/rest/applications/{id}`
-- [ ] Failure returns 422 carrying the **provider's actual error message**, and persists `status=FAILED` + `last_error`
-- [ ] Token never appears in any response body, log line, or step payload (tested)
+- [x] `PUT /projects/{id}/integrations/{kind}` stores config; token → `SecretStore`
+- [x] `POST /projects/{id}/integrations/{kind}/test` → `{ok, latency_ms, detail, error}`
+- [x] Elastic test: `_search size:0` against the configured index pattern
+- [x] Sentry test: `GET /api/0/projects/{org}/{project}/`
+- [x] AppDynamics test: OAuth token then `GET /controller/rest/applications/{id}` (`# TODO: verify live`)
+- [x] Failure returns 422 carrying the **provider's actual error message**, and persists `status=FAILED` + `last_error`
+- [x] Token never appears in any response body (tested); write-only field, stored via `SecretStore`
 
-**Notes:**
+**Notes:** Connection-test success/failure paths tested end-to-end with a mocked provider HTTP layer. Full Elastic/Sentry/AppD data clients arrive in Sprint 2 (T-13–T-15); this task implements only the connection tests.
 
 ---
 

@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.core.cache import RedisCache
 from taproot.core.config import Settings, get_settings
-from taproot.core.exceptions import AuthenticationError
+from taproot.core.exceptions import AuthenticationError, ConfigurationError
+from taproot.core.secrets import SecretStore, build_secret_store
 from taproot.core.security import (
     Principal,
     TokenValidator,
@@ -26,6 +27,7 @@ from taproot.core.security import (
 )
 from taproot.db.models import User
 from taproot.db.session import get_session
+from taproot.integrations.gitlab import GitLabClient
 from taproot.services.user_service import upsert_user
 
 _bearer = HTTPBearer(auto_error=False)
@@ -87,6 +89,42 @@ async def get_current_user(
     return user
 
 
+@lru_cache
+def get_secret_store() -> SecretStore:
+    settings = get_settings()
+    vault_client = None
+    if settings.secret_store == "vault":  # noqa: S105  (store kind, not a secret)
+        import hvac
+
+        vault_client = hvac.Client(url=settings.vault_addr, token=settings.vault_token)
+    return build_secret_store(
+        kind=settings.secret_store,
+        env=settings.env,
+        local_secret_key=settings.local_secret_key,
+        vault_client=vault_client,
+    )
+
+
+@lru_cache
+def get_http_client() -> Any:
+    import httpx
+
+    return httpx.AsyncClient(timeout=30.0)
+
+
+def get_gitlab_client() -> GitLabClient:
+    settings = get_settings()
+    if not settings.gitlab_url or not settings.gitlab_token:
+        raise ConfigurationError(
+            "GitLab discovery requires TAPROOT_GITLAB_URL and TAPROOT_GITLAB_TOKEN."
+        )
+    return GitLabClient(
+        base_url=settings.gitlab_url,
+        token=settings.gitlab_token,
+        http_client=get_http_client(),
+    )
+
+
 def require_role(
     *roles: str,
 ) -> Callable[[Principal], Coroutine[Any, Any, Principal]]:
@@ -101,3 +139,14 @@ def require_role(
         return principal
 
     return checker
+
+
+require_admin = require_role("platform-admin")
+
+
+async def get_current_admin(
+    _: Principal = Depends(require_admin),
+    user: User = Depends(get_current_user),
+) -> User:
+    """Enforce platform-admin and return the (upserted) acting user for audit."""
+    return user

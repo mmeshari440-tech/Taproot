@@ -35,3 +35,15 @@ class AuthorizationError(TaprootError):
 
     Maps to HTTP 403 — never conflate with 401 (ARCHITECTURE.md §8.1).
     """
+
+
+class IntegrationError(TaprootError):
+    """An external integration call failed.
+
+    Carries the provider's actual message so the API can surface it verbatim
+    (PLAN.md §5.1) rather than a generic ``"Something went wrong"``.
+    """
+
+
+class NotFoundError(TaprootError):
+    """A requested entity does not exist. Maps to HTTP 404."""
