@@ -5,7 +5,25 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
-### Sprint 1 — Auth & Admin (in progress)
+### Sprint 1 — Auth & Admin (backend, in progress)
+
+- **T-09 GitLab client & group discovery**: `integrations/gitlab.py` (groups,
+  group projects, `get_file`, `test_connection`) per the client contract —
+  normalized models, jittered retry on 5xx/429, structured logging;
+  `GET /api/v1/projects/gitlab-groups` and `POST /projects/{id}/sync-repos` with
+  token-based FE/BE classification and a `PATCH` manual override.
+- **T-10 Project CRUD (API)**: `services/project_service.py` + `/api/v1/projects`
+  routes (create from group, list, detail, repos, deactivate), all audit-logged,
+  writes gated on `platform-admin`. Admin UI screens land with the FE slice.
+- **T-11 Integration config & connection tests**: `services/integration_service.py`
+  + `/projects/{id}/integrations` routes; tokens are write-only (stored via
+  `SecretStore`, never returned); per-provider tests (Elastic `_search size:0`,
+  Sentry project GET, AppDynamics OAuth→app); failures return **422** with the
+  provider's real message and persist `status=FAILED`.
+- Added normalized domain models (`core/models.py`) and shared integration HTTP
+  helpers; `IntegrationError` / `NotFoundError` exceptions.
+
+### Sprint 1 — Auth & Admin (auth backbone)
 
 - **T-06 Keycloak realm & local instance**: `infra/keycloak/realm-export.json`
   (realm `taproot`, roles `platform-admin`/`tech-user`, public PKCE SPA client
