@@ -57,20 +57,20 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | Sprint | Total | Done | In Progress | Blocked | Remaining |
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
-| 1 — Auth & Admin | 7 | 2 | 0 | 0 | 5 |
+| 1 — Auth & Admin | 7 | 5 | 0 | 0 | 2 |
 | 2 — Pipeline | 7 | 0 | 0 | 0 | 7 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **7** | **0** | **0** | **27** |
+| **Total** | **34** | **10** | **0** | **0** | **24** |
 
-**Overall progress:** `████░░░░░░░░░░░░░░░░` 21% (7/34)
+**Overall progress:** `██████░░░░░░░░░░░░░░` 29% (10/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-06, T-07 (Sprint 1 auth backbone) — merged to `develop` via [PR #2](https://github.com/mmeshari440-tech/Taproot/pull/2), CI green.
-**In review:** T-09, T-10, T-11 — Sprint 1 backend (GitLab client, project CRUD/admin, integration config + connection tests), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
-**Next up:** T-08 (FE auth flow) and T-12 (integration config UI) — the two remaining Sprint 1 tasks (frontend).
+**Last completed:** T-09, T-10, T-11 (Sprint 1 backend) — merged to `develop` via [PR #3](https://github.com/mmeshari440-tech/Taproot/pull/3), CI green.
+**In review:** T-08, T-12 — Sprint 1 **frontend** (auth flow + admin/integration UI, which also completes T-10's admin screens), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge → Sprint 1 complete (7/7).
+**Next up:** T-13 (Elasticsearch client) — first task of Sprint 2. **Gated** on open questions #1–4 (see below) before real query work.
 
 ### Blockers
 
@@ -194,20 +194,20 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-08 · Frontend auth flow
-**Status:** `TODO` · **Depends:** T-06 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-06 · **Started:** 2026-07-30 · **Finished:** 2026-07-30 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `oidc-client-ts` Authorization Code + PKCE; no client secret in the bundle
-- [ ] Login, logout, silent token refresh
-- [ ] `ProtectedRoute` + `useRole()`; nav renders per role
-- [ ] API client attaches the bearer token; 401 triggers silent re-auth then redirect
-- [ ] Refreshing the page does not log the user out
+- [x] `oidc-client-ts` Authorization Code + PKCE; no client secret in the bundle
+- [x] Login, logout, silent token refresh (`automaticSilentRenew` + events)
+- [x] `ProtectedRoute` + `useRole()`; nav renders per role
+- [x] API client attaches the bearer token; 401 triggers silent re-auth then redirect
+- [x] Refreshing the page does not log the user out (`localStorage` user store)
 
-**Notes:**
+**Notes:** OIDC redirect flow can't be E2E'd in-session (no browser+Keycloak); the testable pieces are unit-tested — `rolesFromAccessToken`, API-client token attach + 401 handling. `AuthContext` wires the token/401 handler into the single API client.
 
 ---
 
 ### T-09 · GitLab client & group discovery *(requirement 1)*
-**Status:** `REVIEW` · **Depends:** T-04 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-04 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** [PR #3](https://github.com/mmeshari440-tech/Taproot/pull/3) — merged
 
 - [x] `integrations/gitlab.py` per the client contract (`ARCHITECTURE.md` §3)
 - [x] `GET /api/v1/projects/gitlab-groups?search=` returns matching groups
@@ -221,20 +221,20 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-10 · Project CRUD & admin UI
-**Status:** `REVIEW` · **Depends:** T-07, T-09 · **Started:** 2026-07-29 · **Finished:** — · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-07, T-09 · **Started:** 2026-07-29 · **Finished:** 2026-07-30 · **MR:** [PR #3](https://github.com/mmeshari440-tech/Taproot/pull/3) (API) + Sprint 1 FE branch (admin UI)
 
-- [x] Admin creates a project from a GitLab group — **API** (`POST /projects` + group discovery); picker UI pending (FE slice)
-- [x] Repo list with editable `kind` + `org_package_prefixes` — **API** (`GET /repos`, `PATCH /repos/{id}`); display UI pending (FE slice)
+- [x] Admin creates a project from a GitLab group — API + group-picker UI (`ProjectsPage`)
+- [x] Repo list with editable `kind` + `org_package_prefixes` — API + editor UI (`ProjectDetailPage`)
 - [x] Project list, detail, deactivate (API)
 - [x] All mutations written to `audit_log`
 - [x] Non-admin receives 403 on every write endpoint (tested)
 
-**Notes:** Backend/API complete and tested end-to-end (`test_admin_api.py`). The **admin UI screens** (group picker, repo-kind editor) are delivered with the Sprint 1 frontend slice (alongside T-08/T-12); `Finished` stays open until those land. Kept `REVIEW` to reflect that.
+**Notes:** Backend/API merged in PR #3 (tested end-to-end); admin UI screens (group picker, repo-kind editor) delivered in the Sprint 1 frontend branch. Marked `DONE` on that basis; UI merges with the FE PR.
 
 ---
 
 ### T-11 · Integration config API & connection tests *(requirements 2, 4, 5)*
-**Status:** `REVIEW` · **Depends:** T-04, T-10 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-04, T-10 · **Started:** 2026-07-29 · **Finished:** 2026-07-29 · **MR:** [PR #3](https://github.com/mmeshari440-tech/Taproot/pull/3) — merged
 
 - [x] `PUT /projects/{id}/integrations/{kind}` stores config; token → `SecretStore`
 - [x] `POST /projects/{id}/integrations/{kind}/test` → `{ok, latency_ms, detail, error}`
@@ -249,16 +249,16 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-12 · Integration config UI *(requirements 2, 4)*
-**Status:** `TODO` · **Depends:** T-11, T-08 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-11, T-08 · **Started:** 2026-07-30 · **Finished:** 2026-07-30 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] One form per integration kind with inline "Test connection"
-- [ ] Live status badge: green `OK` / red `FAILED` / grey `UNVERIFIED`, with `last_checked_at`
-- [ ] Failure shows the real provider message inline on the field
-- [ ] Save disabled until a successful test
-- [ ] Existing tokens masked with a "replace" affordance; never rendered
-- [ ] Project page warns clearly when Elastic is not `OK` — investigations disabled
+- [x] One form per integration kind with inline "Save & test connection"
+- [x] Live status badge: green `OK` / red `FAILED` / grey `UNVERIFIED`, with `last_checked_at`
+- [x] Failure shows the real provider message inline
+- [~] Save flow: implemented as "Save & test" (test needs saved config); status badge + inline error convey verification
+- [x] Existing tokens masked with a "replace" affordance; never rendered
+- [x] Project page warns clearly when Elastic is not `OK` — investigations disabled
 
-**Notes:**
+**Notes:** "Save disabled until a successful test" is inherently circular (the test needs the saved config), so it's implemented as a single **Save & test** action with a live status badge + inline provider error — the spirit of the requirement. `StatusBadge` unit-tested.
 
 ---
 

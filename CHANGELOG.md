@@ -5,7 +5,24 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
-### Sprint 1 — Auth & Admin (backend, in progress)
+### Sprint 1 — Auth & Admin (frontend)
+
+- **T-08 Frontend auth flow**: `oidc-client-ts` Authorization Code + PKCE (public
+  client); `AuthProvider`/`useAuth`/`useRole`, `ProtectedRoute`, `/callback`;
+  silent renew; the API client attaches the bearer token and re-auths on 401;
+  session survives refresh via `localStorage`.
+- **T-10 admin UI**: `ProjectsPage` (GitLab group picker → create) and
+  `ProjectDetailPage` (repo list with editable kind, sync-from-GitLab) —
+  completes T-10 (backend merged in PR #3).
+- **T-12 Integration config UI**: per-integration "Save & test" forms with live
+  status badge (OK/FAILED/UNVERIFIED + last-checked), inline provider error,
+  masked token with a "replace" affordance, and an Elastic-not-OK warning that
+  flags investigations as disabled.
+- Frontend deps added: `@tanstack/react-query`, `react-router-dom`,
+  `oidc-client-ts`; UI primitives (card, input, label, badge). Vitest coverage for
+  role extraction, API-client token/401 handling, and status badge.
+
+### Sprint 1 — Auth & Admin (backend)
 
 - **T-09 GitLab client & group discovery**: `integrations/gitlab.py` (groups,
   group projects, `get_file`, `test_connection`) per the client contract —
