@@ -7,6 +7,10 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 2 — Investigation pipeline (run engine)
 
+- **T-19 Investigation UI**: submit page (project selector limited to healthy-Elastic
+  projects, error textarea, time-window) and a live run view with an SSE-driven step
+  timeline (running/ok/failed/skipped, expandable), cancel, and refresh-restore via
+  `Last-Event-ID` replay. Pure `applyStepEvent` reducer + typed `EventSource` wrapper.
 - **T-18 SSE streaming**: `GET /investigations/{id}/stream` per PLAN.md §5.3;
   `EventBus` (Redis pub/sub in prod, in-memory in tests); `StepRecorder` persists
   each step to Postgres **before** publishing (correct `Last-Event-ID` replay);

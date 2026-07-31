@@ -69,8 +69,8 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 **Currently in progress:** _none_
 **Last completed:** T-13, T-14, T-15, T-16 (Sprint 2 client layer) — merged to `develop` via [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5), CI green.
-**In review:** T-17 (Investigation API + ARQ worker) and T-18 (SSE streaming) — the run engine, delivered together on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
-**Next up:** T-19 (Investigation UI — live step timeline) closes Sprint 2.
+**In review:** T-17, T-18, T-19 — the full investigation pipeline (API + worker + SSE + live UI), delivered on branch `claude/zip-folder-review-y5th0x`. On merge **Sprint 2 is complete (7/7)**.
+**Next up:** Sprint 3 — T-20 (LangGraph skeleton & state) → the real agent. **Answer open questions #1–4 (ELK schema) before real query work.**
 
 > ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
 
@@ -346,17 +346,17 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-19 · Investigation UI *(requirements 6, 7, 8, 11)*
-**Status:** `TODO` · **Depends:** T-18, T-08 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-18, T-08 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] Project selector showing only projects with healthy Elastic
-- [ ] Error textarea + time-window picker + Submit
-- [ ] Live step timeline: pending / running / ok / failed / skipped, with per-step elapsed time
-- [ ] Step rows expand to show summary and redacted evidence
-- [ ] Cancel button
-- [ ] Page refresh mid-run restores state (reconcile via `GET` then resume SSE)
-- [ ] Failed and skipped steps display their reason
+- [x] Project selector showing only projects with healthy Elastic (`useHealthyElasticProjects`)
+- [x] Error textarea + time-window picker + Submit
+- [x] Live step timeline: running / ok / failed / skipped (SSE-driven reducer)
+- [x] Step rows expand (`<details>`) to show summary
+- [x] Cancel button (active runs)
+- [x] Page refresh mid-run restores state (EventSource replays from `Last-Event-ID`; status via `GET`)
+- [x] Failed and skipped steps display their reason (summary)
 
-**Notes:**
+**Notes:** Timeline is a pure reducer (`applyStepEvent`) driven by the SSE wrapper — unit-tested (ordering, finish, error/done, skipped). **Per-step elapsed time** is deferred: the step events don't yet carry timestamps (easy follow-up — add `ts`/`ms` to `step.finish`). "Redacted evidence" in step detail arrives with the real agent's step payloads (Sprint 3). Full click-through needs a live Keycloak + worker (not exercisable in-session).
 
 ---
 
