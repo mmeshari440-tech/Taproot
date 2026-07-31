@@ -6,22 +6,48 @@ per-investigation authorization (owner or admin). SSE streaming is T-18.
 
 from __future__ import annotations
 
+import asyncio
+import json
+from collections.abc import AsyncIterator
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from taproot.api.v1.deps import get_current_user, get_job_queue, get_principal
-from taproot.core.exceptions import NotFoundError, PreconditionError
-from taproot.core.security import Principal
-from taproot.db.models import Investigation, InvestigationStatus, User
+from taproot.api.v1.deps import (
+    get_current_user,
+    get_event_bus,
+    get_job_queue,
+    get_principal,
+    get_token_validator,
+)
+from taproot.core.events import EventBus
+from taproot.core.exceptions import AuthenticationError, NotFoundError, PreconditionError
+from taproot.core.security import Principal, TokenValidator
+from taproot.db.models import (
+    Investigation,
+    InvestigationStatus,
+    InvestigationStep,
+    StepStatus,
+    User,
+)
 from taproot.db.session import get_session
 from taproot.services import investigation_service
+from taproot.services.user_service import upsert_user
 from taproot.workers.queue import JobQueue
 
 router = APIRouter(prefix="/investigations", tags=["investigations"])
+
+_TERMINAL = {
+    InvestigationStatus.DONE,
+    InvestigationStatus.FAILED,
+    InvestigationStatus.CANCELLED,
+}
 
 
 class InvestigationCreate(BaseModel):
@@ -138,3 +164,101 @@ async def cancel_investigation(
     inv = await investigation_service.cancel_investigation(session, investigation_id)
     await session.commit()
     return _out(inv)
+
+
+# --- SSE streaming (T-18, req 11) ------------------------------------------
+def _sse(seq: int | None, data: dict[str, Any]) -> str:
+    payload = json.dumps(data)
+    if seq is not None:
+        return f"id: {seq}\ndata: {payload}\n\n"
+    return f"data: {payload}\n\n"
+
+
+def _step_event(step: InvestigationStep) -> dict[str, Any]:
+    if step.status == StepStatus.running:
+        return {"type": "step.start", "seq": step.seq, "node": step.node, "title": step.title}
+    return {
+        "type": "step.finish",
+        "seq": step.seq,
+        "node": step.node,
+        "status": step.status.value,
+        "summary": step.summary,
+        "metrics": {},
+    }
+
+
+async def _event_stream(
+    session: AsyncSession,
+    event_bus: EventBus,
+    inv: Investigation,
+    last_id: int,
+) -> AsyncIterator[str]:
+    async with event_bus.subscribe(inv.id) as live:
+        # Replay persisted steps after Last-Event-ID (DB is the source of truth).
+        steps = (
+            await session.execute(
+                select(InvestigationStep)
+                .where(
+                    InvestigationStep.investigation_id == inv.id,
+                    InvestigationStep.seq > last_id,
+                )
+                .order_by(InvestigationStep.seq)
+            )
+        ).scalars().all()
+        max_seq = last_id
+        for step in steps:
+            yield _sse(step.seq, _step_event(step))
+            max_seq = max(max_seq, step.seq)
+
+        # If the run already finished, replay is enough — close the stream.
+        await session.refresh(inv)
+        if inv.status in _TERMINAL:
+            yield _sse(None, {"type": "done"})
+            return
+
+        # Otherwise relay live events, with a heartbeat to keep proxies open.
+        while True:
+            try:
+                event = await asyncio.wait_for(live.__anext__(), timeout=15.0)
+            except TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            seq = event.get("seq")
+            if isinstance(seq, int):
+                if seq <= max_seq:
+                    continue
+                max_seq = seq
+            yield _sse(seq if isinstance(seq, int) else None, event)
+            if event.get("type") == "done":
+                return
+
+
+@router.get("/{investigation_id}/stream")
+async def stream(
+    investigation_id: UUID,
+    request: Request,
+    access_token: str = Query(..., description="Bearer token (EventSource cannot set headers)"),
+    validator: TokenValidator = Depends(get_token_validator),
+    session: AsyncSession = Depends(get_session),
+    event_bus: EventBus = Depends(get_event_bus),
+) -> StreamingResponse:
+    # EventSource can't send an Authorization header, so the token is a query param.
+    try:
+        principal = await validator.validate(access_token)
+    except AuthenticationError as exc:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+    user = await upsert_user(session, principal)
+    await session.commit()
+
+    try:
+        inv = await investigation_service.get_investigation(session, investigation_id)
+    except NotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    _authorize(inv, user, principal)
+
+    last_id = int(request.headers.get("Last-Event-ID") or 0)
+    return StreamingResponse(
+        _event_stream(session, event_bus, inv, last_id),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

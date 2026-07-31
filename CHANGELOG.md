@@ -7,6 +7,12 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 2 — Investigation pipeline (run engine)
 
+- **T-18 SSE streaming**: `GET /investigations/{id}/stream` per PLAN.md §5.3;
+  `EventBus` (Redis pub/sub in prod, in-memory in tests); `StepRecorder` persists
+  each step to Postgres **before** publishing (correct `Last-Event-ID` replay);
+  15s heartbeat; per-investigation authz (token via query param since EventSource
+  can't set headers). A `demo_runner` emits scripted steps so the pipeline streams
+  end-to-end ahead of the real agent (Sprint 3).
 - **T-17 Investigation API + ARQ worker**: `POST /investigations` (202 + enqueue),
   gated on a verified Elastic integration (422 otherwise); `GET /investigations`
   (paginated, scoped to the caller); `GET`/`cancel` with per-investigation authz

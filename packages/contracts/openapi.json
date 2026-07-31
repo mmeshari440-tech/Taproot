@@ -872,6 +872,58 @@
           }
         }
       }
+    },
+    "/api/v1/investigations/{investigation_id}/stream": {
+      "get": {
+        "tags": [
+          "investigations"
+        ],
+        "summary": "Stream",
+        "operationId": "stream_api_v1_investigations__investigation_id__stream_get",
+        "parameters": [
+          {
+            "name": "investigation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Investigation Id"
+            }
+          },
+          {
+            "name": "access_token",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Bearer token (EventSource cannot set headers)",
+              "title": "Access Token"
+            },
+            "description": "Bearer token (EventSource cannot set headers)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {

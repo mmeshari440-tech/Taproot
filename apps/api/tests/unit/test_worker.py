@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.db.models import Investigation, InvestigationStatus, Project
+from taproot.workers.steps import StepRecorder
 from taproot.workers.tasks import execute_investigation
 
 
@@ -38,7 +39,7 @@ async def test_precancelled_is_left_alone(session: AsyncSession) -> None:
 async def test_cancel_during_run_is_honored(session: AsyncSession) -> None:
     inv = await _queued(session)
 
-    async def cancelling_runner(investigation: Investigation) -> None:
+    async def cancelling_runner(investigation: Investigation, _recorder: StepRecorder) -> None:
         investigation.status = InvestigationStatus.CANCELLED
         await session.commit()
 
@@ -50,7 +51,7 @@ async def test_cancel_during_run_is_honored(session: AsyncSession) -> None:
 async def test_retry_then_fail(session: AsyncSession) -> None:
     inv = await _queued(session)
 
-    async def failing_runner(_investigation: Investigation) -> None:
+    async def failing_runner(_investigation: Investigation, _recorder: StepRecorder) -> None:
         raise RuntimeError("worker crashed")
 
     # First attempt re-raises to let ARQ retry (not yet FAILED).

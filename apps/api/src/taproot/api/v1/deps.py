@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.core.cache import RedisCache
 from taproot.core.config import Settings, get_settings
+from taproot.core.events import EventBus, RedisEventBus
 from taproot.core.exceptions import AuthenticationError, ConfigurationError
 from taproot.core.secrets import SecretStore, build_secret_store
 from taproot.core.security import (
@@ -111,6 +112,19 @@ def get_http_client() -> Any:
     import httpx
 
     return httpx.AsyncClient(timeout=30.0)
+
+
+_redis_pubsub_client: Any = None
+
+
+def get_event_bus() -> EventBus:
+    """Redis-backed SSE fan-out bus, sharing one client."""
+    global _redis_pubsub_client
+    if _redis_pubsub_client is None:
+        from redis.asyncio import from_url
+
+        _redis_pubsub_client = from_url(get_settings().redis_url)  # type: ignore[no-untyped-call]
+    return RedisEventBus(_redis_pubsub_client)
 
 
 _arq_pool: Any = None

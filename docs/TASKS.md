@@ -69,8 +69,8 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 **Currently in progress:** _none_
 **Last completed:** T-13, T-14, T-15, T-16 (Sprint 2 client layer) — merged to `develop` via [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5), CI green.
-**In review:** T-17 — Investigation API + ARQ worker (submit → enqueue → lifecycle, cancel, scoped listing), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
-**Next up:** T-18 (SSE streaming) → T-19 (Investigation UI). T-18 depends on T-17.
+**In review:** T-17 (Investigation API + ARQ worker) and T-18 (SSE streaming) — the run engine, delivered together on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
+**Next up:** T-19 (Investigation UI — live step timeline) closes Sprint 2.
 
 > ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
 
@@ -331,17 +331,17 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-18 · SSE streaming *(requirement 11)*
-**Status:** `TODO` · **Depends:** T-17 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-17 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `GET /investigations/{id}/stream` per the event schema in `PLAN.md` §5.3
-- [ ] Worker publishes to Redis; api relays to connected clients
-- [ ] **Step persisted to Postgres before publishing** (ordering matters for replay)
-- [ ] Heartbeat comment every 15s
-- [ ] `Last-Event-ID` replay from `investigation_steps`
-- [ ] Per-investigation authorization — not just role-based (tested with a foreign user)
-- [ ] Reconnect mid-run tested end to end
+- [x] `GET /investigations/{id}/stream` per the event schema in `PLAN.md` §5.3
+- [x] Worker publishes to Redis (`EventBus`: `RedisEventBus`/`InMemoryEventBus`); api relays
+- [x] **Step persisted to Postgres before publishing** (`StepRecorder._emit` commits then publishes)
+- [x] Heartbeat comment every 15s
+- [x] `Last-Event-ID` replay from `investigation_steps` (seq > last id)
+- [x] Per-investigation authorization — not just role-based (foreign user → 403, tested)
+- [~] Reconnect: replay-from-`Last-Event-ID` tested on a terminal run; live cross-process reconnect needs a real Redis (not exercisable in-session)
 
-**Notes:**
+**Notes:** EventSource can't set headers, so the SSE token is a query param (`?access_token=`), validated per-investigation. A `demo_runner` emits scripted steps so the pipeline streams end-to-end now; real steps come from the LangGraph agent (Sprint 3). `EventBus`/`StepRecorder` and the terminal-replay path are unit-tested; the live Redis fan-out path is covered by the in-memory bus in tests.
 
 ---
 
