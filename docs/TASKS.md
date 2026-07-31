@@ -58,19 +58,19 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
-| 2 — Pipeline | 7 | 0 | 0 | 0 | 7 |
+| 2 — Pipeline | 7 | 4 | 0 | 0 | 3 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **12** | **0** | **0** | **22** |
+| **Total** | **34** | **16** | **0** | **0** | **18** |
 
-**Overall progress:** `███████░░░░░░░░░░░░░` 35% (12/34)
+**Overall progress:** `█████████░░░░░░░░░░░` 47% (16/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-08, T-12 (Sprint 1 frontend) — merged to `develop` via [PR #4](https://github.com/mmeshari440-tech/Taproot/pull/4). **Sprint 1 complete (7/7).**
-**In review:** T-13, T-14, T-15, T-16 — Sprint 2 **external client layer** (Elasticsearch, Sentry, AppDynamics, LLM), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
-**Next up:** T-17 (Investigation API + ARQ worker) → T-18 (SSE) → T-19 (Investigation UI).
+**Last completed:** T-13, T-14, T-15, T-16 (Sprint 2 client layer) — merged to `develop` via [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5), CI green.
+**In review:** T-17, T-18, T-19 — the full investigation pipeline (API + worker + SSE + live UI), delivered on branch `claude/zip-folder-review-y5th0x`. On merge **Sprint 2 is complete (7/7)**.
+**Next up:** Sprint 3 — T-20 (LangGraph skeleton & state) → the real agent. **Answer open questions #1–4 (ELK schema) before real query work.**
 
 > ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
 
@@ -267,7 +267,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ## Sprint 2 — Investigation pipeline (requirements 6–8, 11)
 
 ### T-13 · Elasticsearch client
-**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] `search()`, `thread(txn_id)`, `histogram()`, `cardinality()` per `PLAN.md` §6.3
 - [x] Returns normalized `LogDoc` models, never raw ES JSON
@@ -280,7 +280,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-14 · Sentry client
-**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] `search_issues()`, `latest_event()`, `issue_tags()`
 - [x] Frames normalized to the shared `Frame` model with an `in_app` flag
@@ -292,7 +292,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-15 · AppDynamics client
-**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] OAuth token flow with caching and pre-expiry refresh (30s skew)
 - [x] `business_transactions()`, `error_snapshots()`, `metric_data()`
@@ -304,7 +304,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-16 · LLM client
-**Status:** `REVIEW` · **Depends:** T-04 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-04 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] OpenAI-compatible async client pointed at vLLM
 - [x] Streaming (`stream()`) + tool/function calling (`tools` / `response_format` passthrough)
@@ -317,46 +317,46 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-17 · Investigation API & worker *(requirements 6, 8)*
-**Status:** `TODO` · **Depends:** T-13, T-03 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-13, T-03 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `POST /investigations` → 202 + id, job enqueued to ARQ
-- [ ] Rejects projects whose Elastic integration is not `OK` (422, clear message)
-- [ ] ARQ worker runs the job, updates status transitions
-- [ ] `POST /investigations/{id}/cancel` works mid-run
-- [ ] `GET /investigations?project_id=` paginated, scoped to the caller's access
-- [ ] Worker crash → retried once, then `FAILED` (never infinite requeue)
+- [x] `POST /investigations` → 202 + id, job enqueued to ARQ (`JobQueue` protocol)
+- [x] Rejects projects whose Elastic integration is not `OK` (422, clear message)
+- [x] ARQ worker runs the job, updates status transitions (QUEUED→RUNNING→DONE)
+- [x] `POST /investigations/{id}/cancel` works mid-run (honored before + during the run)
+- [x] `GET /investigations?project_id=` paginated, scoped to the caller (`created_by`)
+- [x] Worker crash → retried once, then `FAILED` (never infinite requeue)
 
-**Notes:**
+**Notes:** The run body is a **stub** `runner` (Sprint 3 T-20 injects the LangGraph agent). `execute_investigation` is unit-tested directly (lifecycle, cancel-before/during, retry→FAILED); the API uses a `FakeJobQueue` in tests and `ArqJobQueue` at runtime (`make worker` / compose `worker` service). Listing is scoped to `created_by`; per-project ACLs arrive with the access model later. Per-investigation authz (owner or admin) on get/cancel; the SSE per-investigation stream is T-18.
 
 ---
 
 ### T-18 · SSE streaming *(requirement 11)*
-**Status:** `TODO` · **Depends:** T-17 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-17 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `GET /investigations/{id}/stream` per the event schema in `PLAN.md` §5.3
-- [ ] Worker publishes to Redis; api relays to connected clients
-- [ ] **Step persisted to Postgres before publishing** (ordering matters for replay)
-- [ ] Heartbeat comment every 15s
-- [ ] `Last-Event-ID` replay from `investigation_steps`
-- [ ] Per-investigation authorization — not just role-based (tested with a foreign user)
-- [ ] Reconnect mid-run tested end to end
+- [x] `GET /investigations/{id}/stream` per the event schema in `PLAN.md` §5.3
+- [x] Worker publishes to Redis (`EventBus`: `RedisEventBus`/`InMemoryEventBus`); api relays
+- [x] **Step persisted to Postgres before publishing** (`StepRecorder._emit` commits then publishes)
+- [x] Heartbeat comment every 15s
+- [x] `Last-Event-ID` replay from `investigation_steps` (seq > last id)
+- [x] Per-investigation authorization — not just role-based (foreign user → 403, tested)
+- [~] Reconnect: replay-from-`Last-Event-ID` tested on a terminal run; live cross-process reconnect needs a real Redis (not exercisable in-session)
 
-**Notes:**
+**Notes:** EventSource can't set headers, so the SSE token is a query param (`?access_token=`), validated per-investigation. A `demo_runner` emits scripted steps so the pipeline streams end-to-end now; real steps come from the LangGraph agent (Sprint 3). `EventBus`/`StepRecorder` and the terminal-replay path are unit-tested; the live Redis fan-out path is covered by the in-memory bus in tests.
 
 ---
 
 ### T-19 · Investigation UI *(requirements 6, 7, 8, 11)*
-**Status:** `TODO` · **Depends:** T-18, T-08 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-18, T-08 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] Project selector showing only projects with healthy Elastic
-- [ ] Error textarea + time-window picker + Submit
-- [ ] Live step timeline: pending / running / ok / failed / skipped, with per-step elapsed time
-- [ ] Step rows expand to show summary and redacted evidence
-- [ ] Cancel button
-- [ ] Page refresh mid-run restores state (reconcile via `GET` then resume SSE)
-- [ ] Failed and skipped steps display their reason
+- [x] Project selector showing only projects with healthy Elastic (`useHealthyElasticProjects`)
+- [x] Error textarea + time-window picker + Submit
+- [x] Live step timeline: running / ok / failed / skipped (SSE-driven reducer)
+- [x] Step rows expand (`<details>`) to show summary
+- [x] Cancel button (active runs)
+- [x] Page refresh mid-run restores state (EventSource replays from `Last-Event-ID`; status via `GET`)
+- [x] Failed and skipped steps display their reason (summary)
 
-**Notes:**
+**Notes:** Timeline is a pure reducer (`applyStepEvent`) driven by the SSE wrapper — unit-tested (ordering, finish, error/done, skipped). **Per-step elapsed time** is deferred: the step events don't yet carry timestamps (easy follow-up — add `ts`/`ms` to `step.finish`). "Redacted evidence" in step detail arrives with the real agent's step payloads (Sprint 3). Full click-through needs a live Keycloak + worker (not exercisable in-session).
 
 ---
 

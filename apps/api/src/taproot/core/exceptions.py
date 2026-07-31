@@ -47,3 +47,8 @@ class IntegrationError(TaprootError):
 
 class NotFoundError(TaprootError):
     """A requested entity does not exist. Maps to HTTP 404."""
+
+
+class PreconditionError(TaprootError):
+    """A required precondition is not met (e.g. Elastic not verified before an
+    investigation). Maps to HTTP 422 with an actionable message."""

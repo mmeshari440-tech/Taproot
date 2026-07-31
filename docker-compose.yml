@@ -68,6 +68,23 @@ services:
       sh -c "uv run alembic upgrade head &&
              uv run uvicorn taproot.main:app --host 0.0.0.0 --port 8000 --reload"
 
+  worker:
+    build:
+      context: ./apps/api
+    environment:
+      TAPROOT_ENV: development
+      TAPROOT_DATABASE_URL: postgresql+asyncpg://taproot:taproot@postgres:5432/taproot
+      TAPROOT_REDIS_URL: redis://redis:6379/0
+      TAPROOT_LOCAL_SECRET_KEY: dev-only-change-me
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps/api:/app
+    command: uv run arq taproot.workers.tasks.WorkerSettings
+
   web:
     build:
       context: ./apps/web

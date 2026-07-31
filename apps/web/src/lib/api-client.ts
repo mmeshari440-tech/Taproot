@@ -127,6 +127,27 @@ export interface IntegrationUpsert {
   config?: Record<string, unknown>;
 }
 
+export type InvestigationStatus = "QUEUED" | "RUNNING" | "DONE" | "FAILED" | "CANCELLED";
+
+export interface Investigation {
+  id: string;
+  project_id: string;
+  error_text: string;
+  status: InvestigationStatus;
+  time_window_days: number;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_ms: number | null;
+}
+
+export interface InvestigationPage {
+  items: Investigation[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 // --- Endpoints --------------------------------------------------------------
 export const api = {
   getMe: () => request<Me>("/api/v1/me"),
@@ -161,4 +182,26 @@ export const api = {
     request<ConnectionTestResult>(`/api/v1/projects/${projectId}/integrations/${kind}/test`, {
       method: "POST",
     }),
+
+  submitInvestigation: (body: {
+    project_id: string;
+    error_text: string;
+    time_window_days: number;
+  }) =>
+    request<Investigation>("/api/v1/investigations", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  getInvestigation: (id: string) => request<Investigation>(`/api/v1/investigations/${id}`),
+  listInvestigations: (projectId?: string) =>
+    request<InvestigationPage>(
+      `/api/v1/investigations${projectId ? `?project_id=${projectId}` : ""}`,
+    ),
+  cancelInvestigation: (id: string) =>
+    request<Investigation>(`/api/v1/investigations/${id}/cancel`, { method: "POST" }),
 };
+
+/** URL for the SSE stream. EventSource can't set headers, so the token is a query param. */
+export function investigationStreamUrl(id: string, token: string): string {
+  return `${API_BASE_URL}/api/v1/investigations/${id}/stream?access_token=${encodeURIComponent(token)}`;
+}

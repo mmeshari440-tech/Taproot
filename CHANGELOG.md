@@ -5,6 +5,26 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Sprint 2 — Investigation pipeline (run engine)
+
+- **T-19 Investigation UI**: submit page (project selector limited to healthy-Elastic
+  projects, error textarea, time-window) and a live run view with an SSE-driven step
+  timeline (running/ok/failed/skipped, expandable), cancel, and refresh-restore via
+  `Last-Event-ID` replay. Pure `applyStepEvent` reducer + typed `EventSource` wrapper.
+- **T-18 SSE streaming**: `GET /investigations/{id}/stream` per PLAN.md §5.3;
+  `EventBus` (Redis pub/sub in prod, in-memory in tests); `StepRecorder` persists
+  each step to Postgres **before** publishing (correct `Last-Event-ID` replay);
+  15s heartbeat; per-investigation authz (token via query param since EventSource
+  can't set headers). A `demo_runner` emits scripted steps so the pipeline streams
+  end-to-end ahead of the real agent (Sprint 3).
+- **T-17 Investigation API + ARQ worker**: `POST /investigations` (202 + enqueue),
+  gated on a verified Elastic integration (422 otherwise); `GET /investigations`
+  (paginated, scoped to the caller); `GET`/`cancel` with per-investigation authz
+  (owner or admin). `JobQueue` protocol (`ArqJobQueue` runtime / `FakeJobQueue`
+  tests); `workers/tasks.py` drives QUEUED→RUNNING→DONE with cancellation and
+  retry-once-then-FAILED semantics, over an injectable `runner` (the LangGraph
+  agent is wired in Sprint 3, T-20). `make worker` + compose `worker` service.
+
 ### Sprint 2 — Investigation pipeline (external client layer)
 
 - **T-13 Elasticsearch client**: `ElasticClient.search/thread/histogram/cardinality`
