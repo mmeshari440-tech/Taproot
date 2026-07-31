@@ -57,20 +57,22 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | Sprint | Total | Done | In Progress | Blocked | Remaining |
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
-| 1 — Auth & Admin | 7 | 5 | 0 | 0 | 2 |
+| 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
 | 2 — Pipeline | 7 | 0 | 0 | 0 | 7 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **10** | **0** | **0** | **24** |
+| **Total** | **34** | **12** | **0** | **0** | **22** |
 
-**Overall progress:** `██████░░░░░░░░░░░░░░` 29% (10/34)
+**Overall progress:** `███████░░░░░░░░░░░░░` 35% (12/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-09, T-10, T-11 (Sprint 1 backend) — merged to `develop` via [PR #3](https://github.com/mmeshari440-tech/Taproot/pull/3), CI green.
-**In review:** T-08, T-12 — Sprint 1 **frontend** (auth flow + admin/integration UI, which also completes T-10's admin screens), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge → Sprint 1 complete (7/7).
-**Next up:** T-13 (Elasticsearch client) — first task of Sprint 2. **Gated** on open questions #1–4 (see below) before real query work.
+**Last completed:** T-08, T-12 (Sprint 1 frontend) — merged to `develop` via [PR #4](https://github.com/mmeshari440-tech/Taproot/pull/4). **Sprint 1 complete (7/7).**
+**In review:** T-13, T-14, T-15, T-16 — Sprint 2 **external client layer** (Elasticsearch, Sentry, AppDynamics, LLM), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
+**Next up:** T-17 (Investigation API + ARQ worker) → T-18 (SSE) → T-19 (Investigation UI).
+
+> ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
 
 ### Blockers
 
@@ -194,7 +196,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-08 · Frontend auth flow
-**Status:** `REVIEW` · **Depends:** T-06 · **Started:** 2026-07-30 · **Finished:** 2026-07-30 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-06 · **Started:** 2026-07-30 · **Finished:** 2026-07-30 · **MR:** [PR #4](https://github.com/mmeshari440-tech/Taproot/pull/4) — merged
 
 - [x] `oidc-client-ts` Authorization Code + PKCE; no client secret in the bundle
 - [x] Login, logout, silent token refresh (`automaticSilentRenew` + events)
@@ -249,7 +251,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-12 · Integration config UI *(requirements 2, 4)*
-**Status:** `REVIEW` · **Depends:** T-11, T-08 · **Started:** 2026-07-30 · **Finished:** 2026-07-30 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11, T-08 · **Started:** 2026-07-30 · **Finished:** 2026-07-30 · **MR:** [PR #4](https://github.com/mmeshari440-tech/Taproot/pull/4) — merged
 
 - [x] One form per integration kind with inline "Save & test connection"
 - [x] Live status badge: green `OK` / red `FAILED` / grey `UNVERIFIED`, with `last_checked_at`
@@ -265,52 +267,52 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ## Sprint 2 — Investigation pipeline (requirements 6–8, 11)
 
 ### T-13 · Elasticsearch client
-**Status:** `TODO` · **Depends:** T-11 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `search()`, `thread(txn_id)`, `histogram()`, `cardinality()` per `PLAN.md` §6.3
-- [ ] Returns normalized `LogDoc` / `LogThread` models, never raw ES JSON
-- [ ] `thread()` returns **all severities**, `@timestamp` ASC, size 500
-- [ ] 30s timeout, retry on 5xx/429 only
-- [ ] Fixture-based unit tests + optional CI job against a docker Elasticsearch
+- [x] `search()`, `thread(txn_id)`, `histogram()`, `cardinality()` per `PLAN.md` §6.3
+- [x] Returns normalized `LogDoc` models, never raw ES JSON
+- [x] `thread()` returns **all severities**, `@timestamp` ASC, size 500
+- [x] 30s timeout, retry on 5xx/429 only (jittered backoff)
+- [x] Fixture-based unit tests (`httpx.MockTransport`); optional docker-ES CI job deferred
 
-**Notes:**
+**Notes:** Coded to the **documented** ELK schema (open questions #1–4 unanswered) with `# TODO: verify against live instance`; `_parse_doc` tolerates nested (`service.name`) and flat shapes. `LogThread` reconstruction (preamble/error/aftermath) belongs to `thread_walk` (T-21); `thread()` returns the ordered `LogDoc` list it consumes.
 
 ---
 
 ### T-14 · Sentry client
-**Status:** `TODO` · **Depends:** T-11 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `search_issues()`, `latest_event()`, `issue_tags()`
-- [ ] Frames normalized to the shared `Frame` model with an `in_app` flag
-- [ ] Release / git SHA extracted when present (feeds T-25)
-- [ ] `userCount`, `firstSeen`, `lastSeen` captured (feeds T-28)
+- [x] `search_issues()`, `latest_event()`, `issue_tags()`
+- [x] Frames normalized to the shared `Frame` model with an `in_app` flag
+- [x] Release / git SHA extracted when present (feeds T-25)
+- [x] `userCount`, `firstSeen`, `lastSeen` captured (feeds T-28)
 
-**Notes:**
+**Notes:** Fixture-tested via `httpx.MockTransport` (issue normalization, frame + release extraction, tags). `# TODO: verify against a live Sentry instance.`
 
 ---
 
 ### T-15 · AppDynamics client
-**Status:** `TODO` · **Depends:** T-11 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] OAuth token flow with caching and pre-expiry refresh
-- [ ] `business_transactions()`, `error_snapshots()`, `metric_data()`
-- [ ] Exit-call breakdown extracted (feeds T-23 third-party detection)
-- [ ] Normalized to shared models
+- [x] OAuth token flow with caching and pre-expiry refresh (30s skew)
+- [x] `business_transactions()`, `error_snapshots()`, `metric_data()`
+- [x] Exit-call breakdown extracted (feeds T-23 third-party detection)
+- [x] Normalized to shared models
 
-**Notes:**
+**Notes:** Token caching verified (one OAuth call across multiple API calls). Snapshot/metric endpoint shapes carry `# TODO: verify against a live controller`.
 
 ---
 
 ### T-16 · LLM client
-**Status:** `TODO` · **Depends:** T-04 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-04 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] OpenAI-compatible async client pointed at vLLM
-- [ ] Streaming + tool/function calling supported
-- [ ] Token accounting returned per call and accumulated on state
-- [ ] `FakeLLM` test double returning scripted responses
-- [ ] Works against Ollama in dev with no code change
+- [x] OpenAI-compatible async client pointed at vLLM
+- [x] Streaming (`stream()`) + tool/function calling (`tools` / `response_format` passthrough)
+- [x] Token accounting returned per call (`LLMUsage`); accumulation onto state is the agent's job (T-20)
+- [x] `FakeLLM` test double returning scripted responses (records messages for the T-22 redaction assertion)
+- [x] Works against Ollama in dev with no code change (only `TAPROOT_LLM_BASE_URL` differs)
 
-**Notes:**
+**Notes:** `LLM` protocol lets the agent depend on an interface; `LLMClient` and `FakeLLM` both implement it. Streaming + non-streaming paths fixture-tested.
 
 ---
 

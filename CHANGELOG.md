@@ -5,6 +5,24 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Sprint 2 — Investigation pipeline (external client layer)
+
+- **T-13 Elasticsearch client**: `ElasticClient.search/thread/histogram/cardinality`
+  (PLAN.md §6.3) returning normalized `LogDoc` (never raw ES JSON); `thread()` is
+  all-severities, `@timestamp` ASC; retry on 5xx/429; coded to the documented ELK
+  schema with `# TODO: verify against live instance` + fixture tests.
+- **T-14 Sentry client**: `SentryClient.search_issues/latest_event/issue_tags`;
+  frames normalized to the shared `Frame` model with `in_app`; release SHA + user
+  count captured.
+- **T-15 AppDynamics client**: OAuth token flow with caching/pre-expiry refresh;
+  `business_transactions/error_snapshots/metric_data`; exit-call breakdown for
+  third-party detection.
+- **T-16 LLM client**: OpenAI-compatible `LLMClient` (vLLM/Ollama) with streaming,
+  tool/`response_format` passthrough, and token accounting; `FakeLLM` test double;
+  narrow `LLM` protocol for the agent to depend on.
+- Added normalized models to `core/models.py` (LogDoc, Frame, Sentry/AppD/LLM
+  types) and a shared `send_with_retries` helper.
+
 ### Sprint 1 — Auth & Admin (frontend)
 
 - **T-08 Frontend auth flow**: `oidc-client-ts` Authorization Code + PKCE (public
