@@ -2,7 +2,32 @@
 
 from __future__ import annotations
 
+import asyncio
+import random
+from collections.abc import Awaitable, Callable
+
 import httpx
+
+RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+async def send_with_retries(
+    send: Callable[[], Awaitable[httpx.Response]],
+    *,
+    max_retries: int = 3,
+    backoff_base: float = 0.5,
+) -> httpx.Response:
+    """Invoke ``send`` with jittered exponential backoff, retrying only on
+    5xx/429 (ARCHITECTURE.md §3). ``send`` is re-called per attempt."""
+    resp = await send()
+    for attempt in range(max_retries):
+        if resp.status_code not in RETRYABLE_STATUS:
+            return resp
+        delay = backoff_base * (2**attempt) + random.uniform(0, backoff_base)  # noqa: S311
+        if delay:
+            await asyncio.sleep(delay)
+        resp = await send()
+    return resp
 
 
 def short_error(resp: httpx.Response) -> str:
