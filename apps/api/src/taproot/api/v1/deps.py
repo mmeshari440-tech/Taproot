@@ -29,6 +29,7 @@ from taproot.db.models import User
 from taproot.db.session import get_session
 from taproot.integrations.gitlab import GitLabClient
 from taproot.services.user_service import upsert_user
+from taproot.workers.queue import ArqJobQueue, JobQueue
 
 _bearer = HTTPBearer(auto_error=False)
 
@@ -46,7 +47,7 @@ def _default_validator() -> TokenValidator:
         keycloak_url=kc_url,
         realm=realm,
         http_client=httpx.AsyncClient(timeout=10.0),
-        cache=RedisCache(from_url(settings.redis_url)),
+        cache=RedisCache(from_url(settings.redis_url)),  # type: ignore[no-untyped-call]
     )
     assert kc_url and realm  # build_jwks_provider raised otherwise  # noqa: S101
     return TokenValidator(
@@ -110,6 +111,20 @@ def get_http_client() -> Any:
     import httpx
 
     return httpx.AsyncClient(timeout=30.0)
+
+
+_arq_pool: Any = None
+
+
+async def get_job_queue() -> JobQueue:
+    """ARQ-backed job queue, sharing one lazily-created pool."""
+    global _arq_pool
+    if _arq_pool is None:
+        from arq import create_pool
+        from arq.connections import RedisSettings
+
+        _arq_pool = await create_pool(RedisSettings.from_dsn(get_settings().redis_url))
+    return ArqJobQueue(_arq_pool)
 
 
 def get_gitlab_client() -> GitLabClient:

@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Sprint 2 — Investigation pipeline (run engine)
+
+- **T-17 Investigation API + ARQ worker**: `POST /investigations` (202 + enqueue),
+  gated on a verified Elastic integration (422 otherwise); `GET /investigations`
+  (paginated, scoped to the caller); `GET`/`cancel` with per-investigation authz
+  (owner or admin). `JobQueue` protocol (`ArqJobQueue` runtime / `FakeJobQueue`
+  tests); `workers/tasks.py` drives QUEUED→RUNNING→DONE with cancellation and
+  retry-once-then-FAILED semantics, over an injectable `runner` (the LangGraph
+  agent is wired in Sprint 3, T-20). `make worker` + compose `worker` service.
+
 ### Sprint 2 — Investigation pipeline (external client layer)
 
 - **T-13 Elasticsearch client**: `ElasticClient.search/thread/histogram/cardinality`

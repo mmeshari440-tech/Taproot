@@ -56,6 +56,10 @@ revision: ## Autogenerate a migration: make revision m="message"
 seed: ## Seed a demo project + user
 	cd $(API) && uv run python -m taproot.db.seed
 
+.PHONY: worker
+worker: ## Run the ARQ investigation worker
+	cd $(API) && uv run arq taproot.workers.tasks.WorkerSettings
+
 .PHONY: gen
 gen: ## Export the OpenAPI schema to packages/contracts
 	cd $(API) && $(DEV_ENV) uv run python -c "import json, pathlib; from taproot.main import create_app; pathlib.Path('../../packages/contracts/openapi.json').write_text(json.dumps(create_app().openapi(), indent=2))"

@@ -58,19 +58,19 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
-| 2 — Pipeline | 7 | 0 | 0 | 0 | 7 |
+| 2 — Pipeline | 7 | 4 | 0 | 0 | 3 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **12** | **0** | **0** | **22** |
+| **Total** | **34** | **16** | **0** | **0** | **18** |
 
-**Overall progress:** `███████░░░░░░░░░░░░░` 35% (12/34)
+**Overall progress:** `█████████░░░░░░░░░░░` 47% (16/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-08, T-12 (Sprint 1 frontend) — merged to `develop` via [PR #4](https://github.com/mmeshari440-tech/Taproot/pull/4). **Sprint 1 complete (7/7).**
-**In review:** T-13, T-14, T-15, T-16 — Sprint 2 **external client layer** (Elasticsearch, Sentry, AppDynamics, LLM), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
-**Next up:** T-17 (Investigation API + ARQ worker) → T-18 (SSE) → T-19 (Investigation UI).
+**Last completed:** T-13, T-14, T-15, T-16 (Sprint 2 client layer) — merged to `develop` via [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5), CI green.
+**In review:** T-17 — Investigation API + ARQ worker (submit → enqueue → lifecycle, cancel, scoped listing), delivered on branch `claude/zip-folder-review-y5th0x`. Move to `DONE` on merge.
+**Next up:** T-18 (SSE streaming) → T-19 (Investigation UI). T-18 depends on T-17.
 
 > ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
 
@@ -267,7 +267,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ## Sprint 2 — Investigation pipeline (requirements 6–8, 11)
 
 ### T-13 · Elasticsearch client
-**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] `search()`, `thread(txn_id)`, `histogram()`, `cardinality()` per `PLAN.md` §6.3
 - [x] Returns normalized `LogDoc` models, never raw ES JSON
@@ -280,7 +280,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-14 · Sentry client
-**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] `search_issues()`, `latest_event()`, `issue_tags()`
 - [x] Frames normalized to the shared `Frame` model with an `in_app` flag
@@ -292,7 +292,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-15 · AppDynamics client
-**Status:** `REVIEW` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-11 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] OAuth token flow with caching and pre-expiry refresh (30s skew)
 - [x] `business_transactions()`, `error_snapshots()`, `metric_data()`
@@ -304,7 +304,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-16 · LLM client
-**Status:** `REVIEW` · **Depends:** T-04 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-04 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5) — merged
 
 - [x] OpenAI-compatible async client pointed at vLLM
 - [x] Streaming (`stream()`) + tool/function calling (`tools` / `response_format` passthrough)
@@ -317,16 +317,16 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-17 · Investigation API & worker *(requirements 6, 8)*
-**Status:** `TODO` · **Depends:** T-13, T-03 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-13, T-03 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `POST /investigations` → 202 + id, job enqueued to ARQ
-- [ ] Rejects projects whose Elastic integration is not `OK` (422, clear message)
-- [ ] ARQ worker runs the job, updates status transitions
-- [ ] `POST /investigations/{id}/cancel` works mid-run
-- [ ] `GET /investigations?project_id=` paginated, scoped to the caller's access
-- [ ] Worker crash → retried once, then `FAILED` (never infinite requeue)
+- [x] `POST /investigations` → 202 + id, job enqueued to ARQ (`JobQueue` protocol)
+- [x] Rejects projects whose Elastic integration is not `OK` (422, clear message)
+- [x] ARQ worker runs the job, updates status transitions (QUEUED→RUNNING→DONE)
+- [x] `POST /investigations/{id}/cancel` works mid-run (honored before + during the run)
+- [x] `GET /investigations?project_id=` paginated, scoped to the caller (`created_by`)
+- [x] Worker crash → retried once, then `FAILED` (never infinite requeue)
 
-**Notes:**
+**Notes:** The run body is a **stub** `runner` (Sprint 3 T-20 injects the LangGraph agent). `execute_investigation` is unit-tested directly (lifecycle, cancel-before/during, retry→FAILED); the API uses a `FakeJobQueue` in tests and `ArqJobQueue` at runtime (`make worker` / compose `worker` service). Listing is scoped to `created_by`; per-project ACLs arrive with the access model later. Per-investigation authz (owner or admin) on get/cancel; the SSE per-investigation stream is T-18.
 
 ---
 
