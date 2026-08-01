@@ -25,18 +25,18 @@ async def test_create_full_project_graph(session: AsyncSession) -> None:
     session.add(project)
     await session.flush()
 
-    session.add(
-        ProjectRepo(
-            project_id=project.id,
-            gitlab_project_id=42,
-            name="be-payments",
-            kind=RepoKind.BE,
-            org_package_prefixes=["com.acme."],
-        )
+    repo = ProjectRepo(
+        project_id=project.id,
+        gitlab_project_id=42,
+        name="be-payments",
+        kind=RepoKind.BE,
+        org_package_prefixes=["com.acme."],
     )
+    session.add(repo)
+    await session.flush()
     session.add(
         Integration(
-            project_id=project.id,
+            project_repo_id=repo.id,
             kind=IntegrationKind.ELASTIC,
             external_id="logs-*",
             secret_ref="local://abc",
@@ -51,7 +51,7 @@ async def test_create_full_project_graph(session: AsyncSession) -> None:
     assert inv.time_window_days == 7
 
     loaded = (
-        await session.execute(select(Integration).where(Integration.project_id == project.id))
+        await session.execute(select(Integration).where(Integration.project_repo_id == repo.id))
     ).scalar_one()
     assert loaded.status == IntegrationStatus.UNVERIFIED
     assert loaded.secret_ref == "local://abc"
@@ -69,8 +69,11 @@ async def test_integration_unique_per_kind(session: AsyncSession) -> None:
     project = Project(name="P", slug="p")
     session.add(project)
     await session.flush()
-    session.add(Integration(project_id=project.id, kind=IntegrationKind.SENTRY))
+    repo = ProjectRepo(project_id=project.id, gitlab_project_id=1, name="app")
+    session.add(repo)
     await session.flush()
-    session.add(Integration(project_id=project.id, kind=IntegrationKind.SENTRY))
+    session.add(Integration(project_repo_id=repo.id, kind=IntegrationKind.SENTRY))
+    await session.flush()
+    session.add(Integration(project_repo_id=repo.id, kind=IntegrationKind.SENTRY))
     with pytest.raises(IntegrityError):
         await session.flush()

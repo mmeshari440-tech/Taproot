@@ -1,23 +1,14 @@
-import { useMutation, useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 
 import { api, type Project } from "@/lib/api-client";
 
-/** Projects whose Elasticsearch integration is verified — the only ones that can
- * run investigations (PLAN.md §5.1). */
+/** Projects with at least one app that has a verified Elastic integration — the
+ * only ones that can run investigations (PLAN.md §5.1, ADR-0002). The backend
+ * computes `elastic_ok` per project, so no per-app fan-out is needed here. */
 export function useHealthyElasticProjects(): { projects: Project[]; isLoading: boolean } {
   const projects = useQuery({ queryKey: ["projects"], queryFn: api.listProjects });
-  const list = projects.data ?? [];
-  const integrations = useQueries({
-    queries: list.map((p) => ({
-      queryKey: ["integrations", p.id],
-      queryFn: () => api.listIntegrations(p.id),
-    })),
-  });
-  const healthy = list.filter((_p, i) =>
-    (integrations[i]?.data ?? []).some((x) => x.kind === "ELASTIC" && x.status === "OK"),
-  );
-  const isLoading = projects.isLoading || integrations.some((q) => q.isLoading);
-  return { projects: healthy, isLoading };
+  const healthy = (projects.data ?? []).filter((p) => p.elastic_ok && p.is_active);
+  return { projects: healthy, isLoading: projects.isLoading };
 }
 
 export function useSubmitInvestigation() {

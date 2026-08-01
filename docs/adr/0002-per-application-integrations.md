@@ -1,6 +1,6 @@
 # ADR 0002 — Integrations are per-application, not per-project
 
-- **Status:** Proposed (awaiting decision)
+- **Status:** Accepted (Option 1 — per-repo integrations; maintainer, 2026-08-01)
 - **Date:** 2026-08-01
 - **Affects:** data model (`integrations`), T-11/T-12 (merged), T-21, T-24, T-25, T-26
 

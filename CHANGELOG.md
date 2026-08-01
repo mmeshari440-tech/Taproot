@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### ADR-0002 — Per-application integrations
+
+- Integrations moved from **per-project** to **per-repo/app** (each app has its own
+  Elastic index + Sentry account). `integrations.project_id` → `project_repo_id`
+  (migration `a1b2c3d4e5f6`); config + connection-test API/UI now live under
+  `/projects/{id}/repos/{repo_id}/integrations`.
+- Elastic client maps the service field from **`container.name`** (falls back to
+  `service.name`).
+- `elastic_ok` exposed per project (any app verified); the investigation gate and
+  the investigate project selector use it. `thread_walk` documented as backend-only
+  (`transaction_id` doesn't cross FE↔BE).
+
 ### Sprint 3 — The agent (skeleton)
 
 - **T-20 LangGraph skeleton & state**: `InvestigationState` (ARCHITECTURE.md §6.2)

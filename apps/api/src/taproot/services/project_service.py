@@ -8,11 +8,19 @@ from __future__ import annotations
 import re
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.core.exceptions import NotFoundError
-from taproot.db.models import AuditLog, Project, ProjectRepo, RepoKind
+from taproot.db.models import (
+    AuditLog,
+    Integration,
+    IntegrationKind,
+    IntegrationStatus,
+    Project,
+    ProjectRepo,
+    RepoKind,
+)
 from taproot.integrations.gitlab import GitLabClient
 
 # --- FE/BE classification heuristic (req 1) --------------------------------
@@ -92,6 +100,24 @@ async def list_projects(session: AsyncSession, *, active_only: bool = False) -> 
     if active_only:
         stmt = stmt.where(Project.is_active.is_(True))
     return list((await session.execute(stmt)).scalars().all())
+
+
+async def has_healthy_elastic(session: AsyncSession, project_id: UUID) -> bool:
+    """True if any of the project's apps (repos) has a verified Elastic
+    integration (ADR-0002 — integrations are per-repo)."""
+    count = (
+        await session.execute(
+            select(func.count())
+            .select_from(Integration)
+            .join(ProjectRepo, Integration.project_repo_id == ProjectRepo.id)
+            .where(
+                ProjectRepo.project_id == project_id,
+                Integration.kind == IntegrationKind.ELASTIC,
+                Integration.status == IntegrationStatus.OK,
+            )
+        )
+    ).scalar_one()
+    return count > 0
 
 
 async def get_project(session: AsyncSession, project_id: UUID) -> Project:

@@ -90,6 +90,24 @@ async def test_histogram_returns_day_buckets() -> None:
     assert [(b.date, b.count) for b in buckets] == [("2026-07-30", 3), ("2026-07-31", 5)]
 
 
+async def test_thread_prefers_container_name_for_service() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "hits": {
+                    "hits": [
+                        {"_source": {"container.name": "payments-be", "message": "x"}},
+                        {"_source": {"container": {"name": "payments-fe"}, "message": "y"}},
+                    ]
+                }
+            },
+        )
+
+    docs = await _client(handler).thread("t1")
+    assert [d.service for d in docs] == ["payments-be", "payments-fe"]
+
+
 async def test_cardinality_returns_int() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"aggregations": {"distinct": {"value": 42}}})

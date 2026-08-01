@@ -51,7 +51,7 @@ describe("api-client", () => {
 
   it("surfaces the provider error message from a 422 detail", async () => {
     mockFetch(422, { detail: { error: "invalid apikey" } });
-    await expect(api.testIntegration("p1", "ELASTIC")).rejects.toMatchObject({
+    await expect(api.testIntegration("p1", "r1", "ELASTIC")).rejects.toMatchObject({
       status: 422,
       message: "invalid apikey",
     });

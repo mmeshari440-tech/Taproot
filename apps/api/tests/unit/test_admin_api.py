@@ -124,12 +124,19 @@ async def test_sync_repos_and_override_kind(env: tuple[FastAPI, AsyncClient]) ->
     assert patched.json()["org_package_prefixes"] == ["com.acme."]
 
 
-# --- T-11 integrations ------------------------------------------------------
+# --- T-11 integrations (per-repo, ADR-0002) --------------------------------
+async def _first_repo(c: AsyncClient, pid: str) -> str:
+    await c.post(f"/api/v1/projects/{pid}/sync-repos", headers=ADMIN)
+    repos = (await c.get(f"/api/v1/projects/{pid}/repos", headers=ADMIN)).json()
+    return str(repos[0]["id"])
+
+
 async def test_put_integration_never_returns_token(env: tuple[FastAPI, AsyncClient]) -> None:
     _, c = env
     pid = await _make_project(c)
+    rid = await _first_repo(c, pid)
     resp = await c.put(
-        f"/api/v1/projects/{pid}/integrations/ELASTIC",
+        f"/api/v1/projects/{pid}/repos/{rid}/integrations/ELASTIC",
         json={"external_id": "logs-*", "base_url": "https://es.test", "token": "sekret-apikey"},
         headers=ADMIN,
     )
@@ -144,8 +151,9 @@ async def test_put_integration_never_returns_token(env: tuple[FastAPI, AsyncClie
 async def test_non_admin_cannot_configure_integration(env: tuple[FastAPI, AsyncClient]) -> None:
     _, c = env
     pid = await _make_project(c)
+    rid = await _first_repo(c, pid)
     resp = await c.put(
-        f"/api/v1/projects/{pid}/integrations/ELASTIC",
+        f"/api/v1/projects/{pid}/repos/{rid}/integrations/ELASTIC",
         json={"external_id": "logs-*", "base_url": "https://es.test", "token": "x"},
         headers=TECH,
     )
@@ -155,8 +163,10 @@ async def test_non_admin_cannot_configure_integration(env: tuple[FastAPI, AsyncC
 async def test_integration_test_success_sets_status_ok(env: tuple[FastAPI, AsyncClient]) -> None:
     app, c = env
     pid = await _make_project(c)
+    rid = await _first_repo(c, pid)
+    base = f"/api/v1/projects/{pid}/repos/{rid}/integrations"
     await c.put(
-        f"/api/v1/projects/{pid}/integrations/ELASTIC",
+        f"{base}/ELASTIC",
         json={"external_id": "logs-*", "base_url": "https://es.test", "token": "k"},
         headers=ADMIN,
     )
@@ -166,11 +176,11 @@ async def test_integration_test_success_sets_status_ok(env: tuple[FastAPI, Async
         return httpx.Response(200, json={"hits": {"total": {"value": 0}}})
 
     app.dependency_overrides[get_http_client] = lambda: _mock_http(handler)
-    resp = await c.post(f"/api/v1/projects/{pid}/integrations/ELASTIC/test", headers=ADMIN)
+    resp = await c.post(f"{base}/ELASTIC/test", headers=ADMIN)
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
-    integrations = (await c.get(f"/api/v1/projects/{pid}/integrations", headers=TECH)).json()
+    integrations = (await c.get(base, headers=TECH)).json()
     assert integrations[0]["status"] == "OK"
 
 
@@ -179,8 +189,10 @@ async def test_integration_test_failure_returns_422_with_provider_message(
 ) -> None:
     app, c = env
     pid = await _make_project(c)
+    rid = await _first_repo(c, pid)
+    base = f"/api/v1/projects/{pid}/repos/{rid}/integrations"
     await c.put(
-        f"/api/v1/projects/{pid}/integrations/ELASTIC",
+        f"{base}/ELASTIC",
         json={"external_id": "logs-*", "base_url": "https://es.test", "token": "bad"},
         headers=ADMIN,
     )
@@ -189,10 +201,10 @@ async def test_integration_test_failure_returns_422_with_provider_message(
         return httpx.Response(401, json={"error": {"reason": "invalid apikey"}})
 
     app.dependency_overrides[get_http_client] = lambda: _mock_http(handler)
-    resp = await c.post(f"/api/v1/projects/{pid}/integrations/ELASTIC/test", headers=ADMIN)
+    resp = await c.post(f"{base}/ELASTIC/test", headers=ADMIN)
     assert resp.status_code == 422
     assert "invalid apikey" in resp.text
 
-    integrations = (await c.get(f"/api/v1/projects/{pid}/integrations", headers=ADMIN)).json()
+    integrations = (await c.get(base, headers=ADMIN)).json()
     assert integrations[0]["status"] == "FAILED"
     assert "invalid apikey" in integrations[0]["last_error"]

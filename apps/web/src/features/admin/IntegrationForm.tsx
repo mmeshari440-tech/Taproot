@@ -16,15 +16,17 @@ const HINTS: Record<IntegrationKind, { externalIdLabel: string; needsClientId?: 
 
 export function IntegrationForm({
   projectId,
+  repoId,
   kind,
   existing,
 }: {
   projectId: string;
+  repoId: string;
   kind: IntegrationKind;
   existing?: Integration;
 }) {
-  const put = usePutIntegration(projectId);
-  const test = useTestIntegration(projectId);
+  const put = usePutIntegration(projectId, repoId);
+  const test = useTestIntegration(projectId, repoId);
   const hint = HINTS[kind];
 
   const [externalId, setExternalId] = useState(existing?.external_id ?? "");

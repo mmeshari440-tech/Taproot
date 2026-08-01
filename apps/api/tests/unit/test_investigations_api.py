@@ -23,6 +23,7 @@ from taproot.db.models import (
     InvestigationStatus,
     InvestigationStep,
     Project,
+    ProjectRepo,
     StepStatus,
 )
 from taproot.db.session import get_session
@@ -51,9 +52,14 @@ class _Env:
             project = Project(name="Payments", slug=f"p-{len(self.queue.enqueued)}-{id(s)}")
             s.add(project)
             await s.flush()
+            repo = ProjectRepo(project_id=project.id, gitlab_project_id=1, name="app")
+            s.add(repo)
+            await s.flush()
             if elastic is not None:
                 s.add(
-                    Integration(project_id=project.id, kind=IntegrationKind.ELASTIC, status=elastic)
+                    Integration(
+                        project_repo_id=repo.id, kind=IntegrationKind.ELASTIC, status=elastic
+                    )
                 )
             await s.commit()
             return project.id

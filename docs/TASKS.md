@@ -70,15 +70,17 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 **Currently in progress:** _none_
 **Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
 **In review:** T-20 — LangGraph skeleton & state (all 11 nodes wired as stubs, parallel fan-out, node contract, max-duration), delivered on branch `claude/zip-folder-review-y5th0x`.
-**Next up:** T-21 (nodes 1–4: normalize → broad search → select → thread_walk) — **the core.** ⚠️ Needs ELK open questions #1–4 answered.
+**Next up:** T-21 (nodes 1–4: normalize → broad search → select → thread_walk) — **the core.** Now unblocked (ELK answers received; ADR-0002 implemented).
 
-> ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
+> ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
 ### Blockers
 
 | Task | Blocked since | What's needed | From whom |
 |---|---|---|---|
-| T-21 | 2026-08-01 | Decision on integration model — per-app vs per-project (see `docs/adr/0002`). ELK answers reveal one index + one Sentry account **per application**, contradicting the per-project model in `ARCHITECTURE.md` §7. | maintainer |
+| — | — | — | — |
+
+> **Resolved 2026-08-01:** ADR-0002 accepted (Option 1 — per-repo integrations) and implemented (`integrations.project_repo_id`, migration `a1b2c3d4e5f6`, per-repo config API/UI, `container.name` service field, per-project `elastic_ok`). T-21 unblocked.
 
 ### Open questions awaiting answers
 
@@ -246,7 +248,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 - [x] Failure returns 422 carrying the **provider's actual error message**, and persists `status=FAILED` + `last_error`
 - [x] Token never appears in any response body (tested); write-only field, stored via `SecretStore`
 
-**Notes:** Connection-test success/failure paths tested end-to-end with a mocked provider HTTP layer. Full Elastic/Sentry/AppD data clients arrive in Sprint 2 (T-13–T-15); this task implements only the connection tests.
+**Notes:** Connection-test success/failure paths tested end-to-end with a mocked provider HTTP layer. Full Elastic/Sentry/AppD data clients arrive in Sprint 2 (T-13–T-15); this task implements only the connection tests. **Amended 2026-08-01 (ADR-0002):** integrations are now **per-repo** — endpoints moved under `/projects/{id}/repos/{repo_id}/integrations`.
 
 ---
 
@@ -260,7 +262,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 - [x] Existing tokens masked with a "replace" affordance; never rendered
 - [x] Project page warns clearly when Elastic is not `OK` — investigations disabled
 
-**Notes:** "Save disabled until a successful test" is inherently circular (the test needs the saved config), so it's implemented as a single **Save & test** action with a live status badge + inline provider error — the spirit of the requirement. `StatusBadge` unit-tested.
+**Notes:** "Save disabled until a successful test" is inherently circular (the test needs the saved config), so it's implemented as a single **Save & test** action with a live status badge + inline provider error — the spirit of the requirement. `StatusBadge` unit-tested. **Amended 2026-08-01 (ADR-0002):** the config UI is now **per app (repo)** — `ProjectDetailPage` renders integration forms per repo.
 
 ---
 

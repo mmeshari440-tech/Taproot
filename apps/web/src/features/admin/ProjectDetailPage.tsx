@@ -41,24 +41,46 @@ function RepoRow({ projectId, repo }: { projectId: string; repo: Repo }) {
   );
 }
 
+/** Each app (repo) has its own Elastic index + Sentry account (ADR-0002). */
+function RepoIntegrations({ projectId, repo }: { projectId: string; repo: Repo }) {
+  const integrations = useIntegrations(projectId, repo.id);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>
+          {repo.name} <span className="text-muted-foreground">· {repo.kind}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {KINDS.map((kind) => (
+          <IntegrationForm
+            key={kind}
+            projectId={projectId}
+            repoId={repo.id}
+            kind={kind}
+            existing={integrations.data?.find((i) => i.kind === kind)}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function ProjectDetailPage() {
   const { id = "" } = useParams();
   const { isAdmin } = useRole();
   const project = useProject(id);
   const repos = useRepos(id);
-  const integrations = useIntegrations(id);
   const sync = useSyncRepos(id);
-
-  const elastic = integrations.data?.find((i) => i.kind === "ELASTIC");
-  const elasticOk = elastic?.status === "OK";
 
   return (
     <div className="mx-auto max-w-3xl space-y-6 p-6">
       <h1 className="text-2xl font-bold text-primary">{project.data?.name ?? "Project"}</h1>
 
-      {!elasticOk && (
+      {project.data && !project.data.elastic_ok && (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-          Elasticsearch is not verified — investigations are disabled until its connection test passes.
+          No app in this project has a verified Elasticsearch integration — investigations are
+          disabled until at least one passes its connection test.
         </div>
       )}
 
@@ -83,28 +105,17 @@ export function ProjectDetailPage() {
         </CardContent>
       </Card>
 
-      <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Integrations</h2>
-        {isAdmin ? (
-          KINDS.map((kind) => (
-            <IntegrationForm
-              key={kind}
-              projectId={id}
-              kind={kind}
-              existing={integrations.data?.find((i) => i.kind === kind)}
-            />
-          ))
-        ) : (
-          <ul className="divide-y divide-border rounded-md border border-border">
-            {(integrations.data ?? []).map((i) => (
-              <li key={i.id} className="flex justify-between px-3 py-2">
-                <span>{i.kind}</span>
-                <span className="text-xs text-muted-foreground">{i.status}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      {isAdmin && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Integrations (per app)</h2>
+          {(repos.data ?? []).map((r) => (
+            <RepoIntegrations key={r.id} projectId={id} repo={r} />
+          ))}
+          {repos.data?.length === 0 && (
+            <p className="text-sm text-muted-foreground">Sync repos first, then configure each app.</p>
+          )}
+        </section>
+      )}
     </div>
   );
 }
