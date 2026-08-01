@@ -78,7 +78,7 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 | Task | Blocked since | What's needed | From whom |
 |---|---|---|---|
-| — | — | — | — |
+| T-21 | 2026-08-01 | Decision on integration model — per-app vs per-project (see `docs/adr/0002`). ELK answers reveal one index + one Sentry account **per application**, contradicting the per-project model in `ARCHITECTURE.md` §7. | maintainer |
 
 ### Open questions awaiting answers
 
@@ -86,11 +86,11 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 
 | # | Question | Answer | Answered on |
 |---|---|---|---|
-| 1 | Does the ELK index have `@timestamp`? | | |
-| 2 | Is there a service/application field? | | |
-| 3 | Does `transaction_id` propagate across services? | | |
-| 4 | Index pattern: shared with service filter, or one per app? | | |
-| 5 | Sentry self-hosted or SaaS? Org slug? Releases tagged with git SHAs? | | |
+| 1 | Does the ELK index have `@timestamp`? | **Yes.** | 2026-08-01 |
+| 2 | Is there a service/application field? | **Each app has its own namespace/index (and its own Sentry account).** The in-log service field is **`container.name`**, not `service.name`. | 2026-08-01 |
+| 3 | Does `transaction_id` propagate across services? | **Backend only** — not across FE↔BE. | 2026-08-01 |
+| 4 | Index pattern: shared with service filter, or one per app? | **One index per app.** | 2026-08-01 |
+| 5 | Sentry self-hosted or SaaS? Org slug? Releases tagged with git SHAs? | **Self-hosted; each app (FE, BE) has its own Sentry account.** (Release/SHA tagging still to confirm.) | 2026-08-01 |
 | 6 | AppDynamics controller URL + OAuth API-client credentials available? | | |
 | 7 | Keycloak realm name; are FE and BE separate clients today? | Realm `taproot`; separate clients — `taproot-web` (public, PKCE) and `taproot-api` (bearer-only). Defined in T-06. | 2026-07-29 |
 | 8 | GPU allocation confirmed? (longest lead time) | | |
