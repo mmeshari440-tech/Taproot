@@ -17,6 +17,24 @@ All notable changes to this project are documented here. Format loosely follows
   the investigate project selector use it. `thread_walk` documented as backend-only
   (`transaction_id` doesn't cross FE↔BE).
 
+### Sprint 3 — The agent (deep dive)
+
+- **T-21 Nodes 1–4 (normalize → broad search → select → thread_walk)**: the core
+  investigation path is now real. `normalize_query` deterministically extracts the
+  exception class, key tokens, a service hint, and search variants. The agent reads
+  Elasticsearch through an `ElasticSearcher` **port** (`agent/context.py`, satisfied
+  by `integrations.elastic.ElasticClient`); the worker injects **one client per
+  verified app** (ADR-0002) via `integration_service.elastic_clients_for_project`,
+  keeping `agent` free of `db`/`integrations`. `elastic_broad_search` merges +
+  de-dups candidate transactions across apps, aborts only when *all* apps error,
+  and routes a zero-hit run straight to synthesis via a new conditional edge (clean
+  "insufficient evidence" abort). `select_threads` ranks by distinct users →
+  completeness → recency and caps at `max_threads`. `thread_walk` fetches all
+  severities `@timestamp` ASC, marks `error_index` at the first
+  ERROR/FATAL/CRITICAL (preamble/aftermath fall out around it), lists distinct
+  services, pseudonymizes the username (`user_<sha256[:8]>`; full redaction is
+  T-22), and summarizes each thread to ≤400 tokens.
+
 ### Sprint 3 — The agent (skeleton)
 
 - **T-20 LangGraph skeleton & state**: `InvestigationState` (ARCHITECTURE.md §6.2)

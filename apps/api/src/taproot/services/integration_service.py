@@ -19,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from taproot.core.exceptions import NotFoundError, SecretStoreError
 from taproot.core.models import ConnectionTestResult
 from taproot.core.secrets import SecretStore
-from taproot.db.models import AuditLog, Integration, IntegrationKind, IntegrationStatus
+from taproot.db.models import (
+    AuditLog,
+    Integration,
+    IntegrationKind,
+    IntegrationStatus,
+    ProjectRepo,
+)
 from taproot.integrations import appdynamics, elastic, sentry
 
 Tester = Callable[..., Awaitable[ConnectionTestResult]]
@@ -130,6 +136,45 @@ async def test_integration(
         )
     )
     return result
+
+
+async def elastic_clients_for_project(
+    session: AsyncSession,
+    project_id: UUID,
+    *,
+    secret_store: SecretStore,
+    http_client: httpx.AsyncClient,
+) -> list[elastic.ElasticClient]:
+    """Build a read-only Elastic client per verified app (ADR-0002: one index
+    per app). The agent's ``thread_walk`` reasons over all of them; unverified or
+    unconfigured apps are simply absent from the list."""
+    rows = (
+        (
+            await session.execute(
+                select(Integration)
+                .join(ProjectRepo, Integration.project_repo_id == ProjectRepo.id)
+                .where(
+                    ProjectRepo.project_id == project_id,
+                    Integration.kind == IntegrationKind.ELASTIC,
+                    Integration.status == IntegrationStatus.OK,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    clients: list[elastic.ElasticClient] = []
+    for integ in rows:
+        token = await secret_store.retrieve(integ.secret_ref) if integ.secret_ref else None
+        clients.append(
+            elastic.ElasticClient(
+                integ.base_url or "",
+                token,
+                integ.external_id or "*",
+                http_client=http_client,
+            )
+        )
+    return clients
 
 
 async def list_integrations(session: AsyncSession, project_repo_id: UUID) -> list[Integration]:

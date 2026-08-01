@@ -27,6 +27,12 @@ def _route_after_verify(state: InvestigationState) -> str:
     return "end"
 
 
+def _route_after_broad(state: InvestigationState) -> str:
+    """Zero candidate transactions → skip the deep dive and synthesize directly
+    (a clean 'insufficient evidence' abort per T-21)."""
+    return "continue" if state.candidate_txn_ids else "empty"
+
+
 def build_graph() -> Any:
     # Typed as Any: LangGraph's builder generics add friction without safety here.
     graph: Any = StateGraph(InvestigationState)
@@ -35,7 +41,11 @@ def build_graph() -> Any:
 
     graph.add_edge(START, "normalize_query")
     graph.add_edge("normalize_query", "elastic_broad_search")
-    graph.add_edge("elastic_broad_search", "select_threads")
+    graph.add_conditional_edges(
+        "elastic_broad_search",
+        _route_after_broad,
+        {"continue": "select_threads", "empty": "synthesize"},
+    )
     graph.add_edge("select_threads", "thread_walk")
 
     # Fan out to the parallel enrichment nodes, fan in at severity_score.

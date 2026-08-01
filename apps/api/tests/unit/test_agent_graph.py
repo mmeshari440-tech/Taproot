@@ -9,6 +9,7 @@ from taproot.agent.context import AgentContext
 from taproot.agent.graph import run_graph
 from taproot.agent.nodes import ALL_NODES, PARALLEL_NODES, node
 from taproot.agent.state import InvestigationState
+from taproot.core.models import BroadSearchResult, LogDoc
 
 
 def _state() -> InvestigationState:
@@ -17,13 +18,32 @@ def _state() -> InvestigationState:
     )
 
 
+class _FakeElastic:
+    """Minimal ElasticSearcher: one candidate transaction with a small thread."""
+
+    async def search(
+        self, error_text: str, *, window_days: int = 7, size: int = 50
+    ) -> BroadSearchResult:
+        return BroadSearchResult(
+            docs=[LogDoc(severity="ERROR", message="boom", transaction_id="txn-1")],
+            transaction_ids=["txn-1"],
+        )
+
+    async def thread(self, transaction_id: str, *, size: int = 500) -> list[LogDoc]:
+        return [LogDoc(severity="ERROR", message="boom", transaction_id=transaction_id)]
+
+
 class _Recorder:
     def __init__(self) -> None:
         self.events: list[tuple] = []
         self._seq = 0
 
     def context(
-        self, *, node_timeout_s: float = 45.0, max_duration_s: float = 300.0
+        self,
+        *,
+        node_timeout_s: float = 45.0,
+        max_duration_s: float = 300.0,
+        with_elastic: bool = False,
     ) -> AgentContext:
         async def emit_start(node_name: str, _title: str) -> int:
             self._seq += 1
@@ -33,7 +53,13 @@ class _Recorder:
         async def emit_finish(seq: int, node_name: str, status: str, summary: str | None) -> None:
             self.events.append(("finish", node_name, status))
 
-        return AgentContext(emit_start, emit_finish, node_timeout_s, max_duration_s)
+        return AgentContext(
+            emit_start,
+            emit_finish,
+            node_timeout_s,
+            max_duration_s,
+            elastic_clients=[_FakeElastic()] if with_elastic else [],
+        )
 
     def started(self) -> set[str]:
         return {e[1] for e in self.events if e[0] == "start"}
@@ -45,7 +71,7 @@ class _Recorder:
 # --- full graph -------------------------------------------------------------
 async def test_graph_runs_all_nodes_and_produces_result() -> None:
     rec = _Recorder()
-    final = await run_graph(_state(), rec.context())
+    final = await run_graph(_state(), rec.context(with_elastic=True))
 
     # Every node emitted start + a successful finish.
     expected = {fn.__name__ for fn in ALL_NODES}
@@ -57,9 +83,22 @@ async def test_graph_runs_all_nodes_and_produces_result() -> None:
     assert final["node_errors"] == {}
 
 
-async def test_parallel_nodes_write_disjoint_fields() -> None:
+async def test_no_hits_skips_deep_dive_and_synthesizes() -> None:
+    # No Elastic client → zero candidates → route straight to synthesize (clean abort).
     rec = _Recorder()
     final = await run_graph(_state(), rec.context())
+
+    started = rec.started()
+    assert started == {"normalize_query", "elastic_broad_search", "synthesize", "verify"}
+    assert "select_threads" not in started
+    assert not set(PARALLEL_NODES) & started
+    assert final["result"] is not None
+    assert final["node_errors"] == {}
+
+
+async def test_parallel_nodes_write_disjoint_fields() -> None:
+    rec = _Recorder()
+    final = await run_graph(_state(), rec.context(with_elastic=True))
     # All five fan-out fields populated → LangGraph merged disjoint updates cleanly.
     assert final["third_party"] is not None
     assert final["sentry"] is not None

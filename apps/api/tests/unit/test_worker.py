@@ -76,7 +76,7 @@ async def test_retry_then_fail(session: AsyncSession) -> None:
     assert inv.error is not None and "crashed" in inv.error
 
 
-async def test_agent_runner_streams_all_nodes_and_persists_result(session: AsyncSession) -> None:
+async def test_agent_runner_streams_nodes_and_persists_result(session: AsyncSession) -> None:
     inv = await _queued(session)
     await execute_investigation(
         session, inv.id, runner=agent_runner, event_bus=InMemoryEventBus()
@@ -91,7 +91,9 @@ async def test_agent_runner_streams_all_nodes_and_persists_result(session: Async
             .where(InvestigationStep.investigation_id == inv.id)
         )
     ).scalar_one()
-    assert step_count == 12  # all agent nodes emitted a step
+    # The seeded project has no verified Elastic app → broad search finds nothing
+    # → the run routes straight to synthesis: normalize, search, synthesize, verify.
+    assert step_count == 4
 
     result = (
         await session.execute(

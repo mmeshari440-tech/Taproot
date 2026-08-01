@@ -69,8 +69,8 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 **Currently in progress:** _none_
 **Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
-**In review:** T-20 — LangGraph skeleton & state (all 11 nodes wired as stubs, parallel fan-out, node contract, max-duration), delivered on branch `claude/zip-folder-review-y5th0x`.
-**Next up:** T-21 (nodes 1–4: normalize → broad search → select → thread_walk) — **the core.** Now unblocked (ELK answers received; ADR-0002 implemented).
+**In review:** T-20 (LangGraph skeleton & state) + T-21 (nodes 1–4: normalize → broad search → select → thread_walk — **the core deep dive**) + ADR-0002 (per-application integrations), all delivered on branch `claude/zip-folder-review-y5th0x` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
+**Next up:** T-22 (redaction layer) — depends on T-20 (in review).
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -382,17 +382,17 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-21 · Nodes 1–4: normalize, broad search, select threads, thread_walk ⭐
-**Status:** `TODO` · **Depends:** T-20, T-13 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-20, T-13 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
 
-- [ ] `normalize_query` extracts exception class, key tokens, service hint, time window
-- [ ] `elastic_broad_search` per `PLAN.md` §6.3; aborts the run cleanly on zero hits
-- [ ] `select_threads` ranks by recency + completeness + distinct users, caps at 5
-- [ ] `thread_walk` fetches all severities ASC and splits `preamble` / `error` / `aftermath`
-- [ ] Threads summarized to ≤400 tokens each before synthesis
-- [ ] Seeded-index test: correct chronological ordering, correct error index, preamble non-empty
-- [ ] Multi-service thread test: `services` list populated when txn crosses boundaries
+- [x] `normalize_query` extracts exception class, key tokens, service hint, time window
+- [x] `elastic_broad_search` per `PLAN.md` §6.3; aborts the run cleanly on zero hits
+- [x] `select_threads` ranks by recency + completeness + distinct users, caps at 5
+- [x] `thread_walk` fetches all severities ASC and splits `preamble` / `error` / `aftermath`
+- [x] Threads summarized to ≤400 tokens each before synthesis
+- [x] Seeded-index test: correct chronological ordering, correct error index, preamble non-empty
+- [x] Multi-service thread test: `services` list populated when txn crosses boundaries
 
-**Notes:**
+**Notes:** Nodes 1–4 are deterministic (no LLM yet — that lands with synthesis/redaction). The agent reasons over Elasticsearch through an `ElasticSearcher` **port** (`agent/context.py`), structurally satisfied by `integrations.elastic.ElasticClient`; the worker injects **one client per verified app** (ADR-0002) via `integration_service.elastic_clients_for_project`, keeping `agent` free of `db`/`integrations`. `elastic_broad_search` merges + de-dups transactions across apps and aborts only when **all** apps error (it's critical); **zero candidate transactions** routes via a new conditional edge straight to `synthesize` (clean "insufficient evidence" abort). `thread_walk` orders docs ASC, sets `error_index` at the first ERROR/FATAL/CRITICAL (preamble/aftermath are the slices around it), lists distinct services, hashes the username to a stable `user_<sha256[:8]>` (full redaction is T-22), and caps each summary at ~400 tokens. `transaction_id` is backend-only (Q3), so a walk reconstructs one app's thread; FE↔BE correlation is Phase-2.
 
 ---
 
