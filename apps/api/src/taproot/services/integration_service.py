@@ -19,7 +19,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from taproot.core.exceptions import NotFoundError, SecretStoreError
 from taproot.core.models import ConnectionTestResult
 from taproot.core.secrets import SecretStore
-from taproot.db.models import AuditLog, Integration, IntegrationKind, IntegrationStatus
+from taproot.db.models import (
+    AuditLog,
+    Integration,
+    IntegrationKind,
+    IntegrationStatus,
+    ProjectRepo,
+)
 from taproot.integrations import appdynamics, elastic, sentry
 
 Tester = Callable[..., Awaitable[ConnectionTestResult]]
@@ -32,12 +38,12 @@ _TESTERS: dict[IntegrationKind, Tester] = {
 
 
 async def _get(
-    session: AsyncSession, project_id: UUID, kind: IntegrationKind
+    session: AsyncSession, project_repo_id: UUID, kind: IntegrationKind
 ) -> Integration | None:
     return (
         await session.execute(
             select(Integration).where(
-                Integration.project_id == project_id, Integration.kind == kind
+                Integration.project_repo_id == project_repo_id, Integration.kind == kind
             )
         )
     ).scalar_one_or_none()
@@ -47,7 +53,7 @@ async def upsert_integration(
     session: AsyncSession,
     *,
     actor_id: UUID | None,
-    project_id: UUID,
+    project_repo_id: UUID,
     kind: IntegrationKind,
     external_id: str | None,
     base_url: str | None,
@@ -57,11 +63,11 @@ async def upsert_integration(
 ) -> Integration:
     """Create/update integration config. A new ``token`` is stored via the
     SecretStore; when omitted the existing secret is kept (masked-field edits)."""
-    integ = await _get(session, project_id, kind)
+    integ = await _get(session, project_repo_id, kind)
     secret_ref = integ.secret_ref if integ else None
 
     if token:
-        new_ref = await secret_store.store(f"{project_id}:{kind.value}", token)
+        new_ref = await secret_store.store(f"{project_repo_id}:{kind.value}", token)
         if secret_ref:
             try:
                 await secret_store.delete(secret_ref)
@@ -70,7 +76,7 @@ async def upsert_integration(
         secret_ref = new_ref
 
     if integ is None:
-        integ = Integration(project_id=project_id, kind=kind)
+        integ = Integration(project_repo_id=project_repo_id, kind=kind)
         session.add(integ)
 
     integ.external_id = external_id
@@ -97,14 +103,14 @@ async def test_integration(
     session: AsyncSession,
     *,
     actor_id: UUID | None,
-    project_id: UUID,
+    project_repo_id: UUID,
     kind: IntegrationKind,
     secret_store: SecretStore,
     http_client: httpx.AsyncClient,
 ) -> ConnectionTestResult:
-    integ = await _get(session, project_id, kind)
+    integ = await _get(session, project_repo_id, kind)
     if integ is None:
-        raise NotFoundError(f"No {kind.value} integration for project {project_id}")
+        raise NotFoundError(f"No {kind.value} integration for repo {project_repo_id}")
 
     token = await secret_store.retrieve(integ.secret_ref) if integ.secret_ref else None
     tester = _TESTERS[kind]
@@ -132,11 +138,50 @@ async def test_integration(
     return result
 
 
-async def list_integrations(session: AsyncSession, project_id: UUID) -> list[Integration]:
+async def elastic_clients_for_project(
+    session: AsyncSession,
+    project_id: UUID,
+    *,
+    secret_store: SecretStore,
+    http_client: httpx.AsyncClient,
+) -> list[elastic.ElasticClient]:
+    """Build a read-only Elastic client per verified app (ADR-0002: one index
+    per app). The agent's ``thread_walk`` reasons over all of them; unverified or
+    unconfigured apps are simply absent from the list."""
+    rows = (
+        (
+            await session.execute(
+                select(Integration)
+                .join(ProjectRepo, Integration.project_repo_id == ProjectRepo.id)
+                .where(
+                    ProjectRepo.project_id == project_id,
+                    Integration.kind == IntegrationKind.ELASTIC,
+                    Integration.status == IntegrationStatus.OK,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    clients: list[elastic.ElasticClient] = []
+    for integ in rows:
+        token = await secret_store.retrieve(integ.secret_ref) if integ.secret_ref else None
+        clients.append(
+            elastic.ElasticClient(
+                integ.base_url or "",
+                token,
+                integ.external_id or "*",
+                http_client=http_client,
+            )
+        )
+    return clients
+
+
+async def list_integrations(session: AsyncSession, project_repo_id: UUID) -> list[Integration]:
     return list(
         (
             await session.execute(
-                select(Integration).where(Integration.project_id == project_id)
+                select(Integration).where(Integration.project_repo_id == project_repo_id)
             )
         )
         .scalars()

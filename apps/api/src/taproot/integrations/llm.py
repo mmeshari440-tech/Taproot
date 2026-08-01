@@ -15,6 +15,7 @@ import httpx
 
 from taproot.core.logging import get_logger
 from taproot.core.models import LLMMessage, LLMResponse, LLMUsage
+from taproot.core.redaction import redact_messages
 
 _log = get_logger(__name__)
 
@@ -31,9 +32,12 @@ class LLM(Protocol):
         response_format: dict[str, Any] | None = None,
     ) -> LLMResponse: ...
 
-    async def stream(
+    def stream(
         self, messages: list[LLMMessage], *, temperature: float = 0.0
-    ) -> AsyncIterator[str]: ...
+    ) -> AsyncIterator[str]:
+        # A function returning an async iterator (async-generator impls satisfy this);
+        # declaring it ``async def`` would type the call as a coroutine, not an iterator.
+        ...
 
 
 class LLMClient:
@@ -143,6 +147,39 @@ class LLMClient:
                 delta = json.loads(chunk)["choices"][0].get("delta", {}).get("content")
                 if delta:
                     yield delta
+
+
+class RedactingLLM:
+    """Redaction boundary (ARCHITECTURE.md §8.3): wraps any ``LLM`` and scrubs
+    every message before it reaches the model. The agent depends on the ``LLM``
+    protocol, so it never talks to a raw model directly — the worker injects
+    ``RedactingLLM(inner)`` and there is no bypass."""
+
+    def __init__(self, inner: LLM) -> None:
+        self._inner = inner
+
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        return await self._inner.complete(
+            redact_messages(messages),
+            temperature=temperature,
+            max_tokens=max_tokens,
+            tools=tools,
+            response_format=response_format,
+        )
+
+    async def stream(
+        self, messages: list[LLMMessage], *, temperature: float = 0.0
+    ) -> AsyncIterator[str]:
+        async for token in self._inner.stream(redact_messages(messages), temperature=temperature):
+            yield token
 
 
 class FakeLLM:

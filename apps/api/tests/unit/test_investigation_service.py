@@ -10,6 +10,7 @@ from taproot.db.models import (
     IntegrationStatus,
     InvestigationStatus,
     Project,
+    ProjectRepo,
     User,
 )
 from taproot.services import investigation_service as svc
@@ -19,9 +20,12 @@ async def _project(session: AsyncSession, *, elastic: IntegrationStatus | None) 
     project = Project(name="P", slug=f"p-{id(session)}")
     session.add(project)
     await session.flush()
+    repo = ProjectRepo(project_id=project.id, gitlab_project_id=1, name="app")
+    session.add(repo)
+    await session.flush()
     if elastic is not None:
         session.add(
-            Integration(project_id=project.id, kind=IntegrationKind.ELASTIC, status=elastic)
+            Integration(project_repo_id=repo.id, kind=IntegrationKind.ELASTIC, status=elastic)
         )
         await session.flush()
     return project

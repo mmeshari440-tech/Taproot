@@ -47,6 +47,7 @@ class ProjectOut(BaseModel):
     slug: str
     gitlab_group_path: str | None
     is_active: bool
+    elastic_ok: bool = False  # any app has a verified Elastic integration (ADR-0002)
 
 
 class RepoOut(BaseModel):
@@ -64,13 +65,14 @@ class RepoKindUpdate(BaseModel):
     org_package_prefixes: list[str] | None = None
 
 
-def _project_out(p: Project) -> ProjectOut:
+def _project_out(p: Project, *, elastic_ok: bool = False) -> ProjectOut:
     return ProjectOut(
         id=p.id,
         name=p.name,
         slug=p.slug,
         gitlab_group_path=p.gitlab_group_path,
         is_active=p.is_active,
+        elastic_ok=elastic_ok,
     )
 
 
@@ -127,7 +129,11 @@ async def list_projects(
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[ProjectOut]:
-    return [_project_out(p) for p in await project_service.list_projects(session)]
+    projects = await project_service.list_projects(session)
+    return [
+        _project_out(p, elastic_ok=await project_service.has_healthy_elastic(session, p.id))
+        for p in projects
+    ]
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -137,9 +143,11 @@ async def get_project(
     session: AsyncSession = Depends(get_session),
 ) -> ProjectOut:
     try:
-        return _project_out(await project_service.get_project(session, project_id))
+        project = await project_service.get_project(session, project_id)
     except NotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    ok = await project_service.has_healthy_elastic(session, project.id)
+    return _project_out(project, elastic_ok=ok)
 
 
 @router.get("/{project_id}/repos", response_model=list[RepoOut])

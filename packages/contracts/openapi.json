@@ -481,13 +481,13 @@
         }
       }
     },
-    "/api/v1/projects/{project_id}/integrations": {
+    "/api/v1/projects/{project_id}/repos/{repo_id}/integrations": {
       "get": {
         "tags": [
           "integrations"
         ],
         "summary": "List Integrations",
-        "operationId": "list_integrations_api_v1_projects__project_id__integrations_get",
+        "operationId": "list_integrations_api_v1_projects__project_id__repos__repo_id__integrations_get",
         "security": [
           {
             "HTTPBearer": []
@@ -503,6 +503,16 @@
               "format": "uuid",
               "title": "Project Id"
             }
+          },
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repo Id"
+            }
           }
         ],
         "responses": {
@@ -515,7 +525,7 @@
                   "items": {
                     "$ref": "#/components/schemas/IntegrationOut"
                   },
-                  "title": "Response List Integrations Api V1 Projects  Project Id  Integrations Get"
+                  "title": "Response List Integrations Api V1 Projects  Project Id  Repos  Repo Id  Integrations Get"
                 }
               }
             }
@@ -533,13 +543,13 @@
         }
       }
     },
-    "/api/v1/projects/{project_id}/integrations/{kind}": {
+    "/api/v1/projects/{project_id}/repos/{repo_id}/integrations/{kind}": {
       "put": {
         "tags": [
           "integrations"
         ],
         "summary": "Upsert Integration",
-        "operationId": "upsert_integration_api_v1_projects__project_id__integrations__kind__put",
+        "operationId": "upsert_integration_api_v1_projects__project_id__repos__repo_id__integrations__kind__put",
         "security": [
           {
             "HTTPBearer": []
@@ -554,6 +564,16 @@
               "type": "string",
               "format": "uuid",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repo Id"
             }
           },
           {
@@ -599,13 +619,13 @@
         }
       }
     },
-    "/api/v1/projects/{project_id}/integrations/{kind}/test": {
+    "/api/v1/projects/{project_id}/repos/{repo_id}/integrations/{kind}/test": {
       "post": {
         "tags": [
           "integrations"
         ],
         "summary": "Test Integration",
-        "operationId": "test_integration_api_v1_projects__project_id__integrations__kind__test_post",
+        "operationId": "test_integration_api_v1_projects__project_id__repos__repo_id__integrations__kind__test_post",
         "security": [
           {
             "HTTPBearer": []
@@ -620,6 +640,16 @@
               "type": "string",
               "format": "uuid",
               "title": "Project Id"
+            }
+          },
+          {
+            "name": "repo_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Repo Id"
             }
           },
           {
@@ -1341,6 +1371,11 @@
           "is_active": {
             "type": "boolean",
             "title": "Is Active"
+          },
+          "elastic_ok": {
+            "type": "boolean",
+            "title": "Elastic Ok",
+            "default": false
           }
         },
         "type": "object",

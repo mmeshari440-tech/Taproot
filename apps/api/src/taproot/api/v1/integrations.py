@@ -27,7 +27,10 @@ from taproot.db.models import Integration, IntegrationKind, IntegrationStatus, U
 from taproot.db.session import get_session
 from taproot.services import integration_service
 
-router = APIRouter(prefix="/projects/{project_id}/integrations", tags=["integrations"])
+# Per-application: integrations live under a repo (ADR-0002).
+router = APIRouter(
+    prefix="/projects/{project_id}/repos/{repo_id}/integrations", tags=["integrations"]
+)
 
 _TESTABLE = {IntegrationKind.ELASTIC, IntegrationKind.SENTRY, IntegrationKind.APPDYNAMICS}
 
@@ -81,15 +84,17 @@ def _reject_untestable(kind: IntegrationKind) -> None:
 @router.get("", response_model=list[IntegrationOut])
 async def list_integrations(
     project_id: UUID,
+    repo_id: UUID,
     _: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ) -> list[IntegrationOut]:
-    return [_out(i) for i in await integration_service.list_integrations(session, project_id)]
+    return [_out(i) for i in await integration_service.list_integrations(session, repo_id)]
 
 
 @router.put("/{kind}", response_model=IntegrationOut)
 async def upsert_integration(
     project_id: UUID,
+    repo_id: UUID,
     kind: IntegrationKind,
     body: IntegrationUpsert,
     admin: User = Depends(get_current_admin),
@@ -100,7 +105,7 @@ async def upsert_integration(
     integ = await integration_service.upsert_integration(
         session,
         actor_id=admin.id,
-        project_id=project_id,
+        project_repo_id=repo_id,
         kind=kind,
         external_id=body.external_id,
         base_url=body.base_url,
@@ -115,6 +120,7 @@ async def upsert_integration(
 @router.post("/{kind}/test", response_model=TestResultOut)
 async def test_integration(
     project_id: UUID,
+    repo_id: UUID,
     kind: IntegrationKind,
     admin: User = Depends(get_current_admin),
     session: AsyncSession = Depends(get_session),
@@ -126,7 +132,7 @@ async def test_integration(
         result = await integration_service.test_integration(
             session,
             actor_id=admin.id,
-            project_id=project_id,
+            project_repo_id=repo_id,
             kind=kind,
             secret_store=secret_store,
             http_client=http_client,

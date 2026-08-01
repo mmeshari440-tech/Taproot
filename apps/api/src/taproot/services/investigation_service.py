@@ -14,27 +14,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.core.exceptions import NotFoundError, PreconditionError
-from taproot.db.models import (
-    Integration,
-    IntegrationKind,
-    IntegrationStatus,
-    Investigation,
-    InvestigationStatus,
-)
+from taproot.db.models import Investigation, InvestigationStatus
+from taproot.services.project_service import has_healthy_elastic
 
 _ACTIVE = (InvestigationStatus.QUEUED, InvestigationStatus.RUNNING)
-
-
-async def _elastic_ok(session: AsyncSession, project_id: UUID) -> bool:
-    status = (
-        await session.execute(
-            select(Integration.status).where(
-                Integration.project_id == project_id,
-                Integration.kind == IntegrationKind.ELASTIC,
-            )
-        )
-    ).scalar_one_or_none()
-    return status == IntegrationStatus.OK
 
 
 async def create_investigation(
@@ -45,7 +28,7 @@ async def create_investigation(
     error_text: str,
     time_window_days: int = 7,
 ) -> Investigation:
-    if not await _elastic_ok(session, project_id):
+    if not await has_healthy_elastic(session, project_id):
         raise PreconditionError(
             "This project's Elasticsearch integration is not verified (status must be OK) "
             "before investigations can run."

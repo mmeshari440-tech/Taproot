@@ -83,6 +83,7 @@ export interface Project {
   slug: string;
   gitlab_group_path: string | null;
   is_active: boolean;
+  elastic_ok: boolean;
 }
 
 export interface GitLabGroup {
@@ -171,17 +172,24 @@ export const api = {
       body: JSON.stringify(body),
     }),
 
-  listIntegrations: (projectId: string) =>
-    request<Integration[]>(`/api/v1/projects/${projectId}/integrations`),
-  putIntegration: (projectId: string, kind: IntegrationKind, body: IntegrationUpsert) =>
-    request<Integration>(`/api/v1/projects/${projectId}/integrations/${kind}`, {
+  // Integrations are per-app/repo (ADR-0002).
+  listIntegrations: (projectId: string, repoId: string) =>
+    request<Integration[]>(`/api/v1/projects/${projectId}/repos/${repoId}/integrations`),
+  putIntegration: (
+    projectId: string,
+    repoId: string,
+    kind: IntegrationKind,
+    body: IntegrationUpsert,
+  ) =>
+    request<Integration>(`/api/v1/projects/${projectId}/repos/${repoId}/integrations/${kind}`, {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  testIntegration: (projectId: string, kind: IntegrationKind) =>
-    request<ConnectionTestResult>(`/api/v1/projects/${projectId}/integrations/${kind}/test`, {
-      method: "POST",
-    }),
+  testIntegration: (projectId: string, repoId: string, kind: IntegrationKind) =>
+    request<ConnectionTestResult>(
+      `/api/v1/projects/${projectId}/repos/${repoId}/integrations/${kind}/test`,
+      { method: "POST" },
+    ),
 
   submitInvestigation: (body: {
     project_id: string;

@@ -58,21 +58,21 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
-| 2 — Pipeline | 7 | 4 | 0 | 0 | 3 |
+| 2 — Pipeline | 7 | 7 | 0 | 0 | 0 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **16** | **0** | **0** | **18** |
+| **Total** | **34** | **19** | **0** | **0** | **15** |
 
-**Overall progress:** `█████████░░░░░░░░░░░` 47% (16/34)
+**Overall progress:** `███████████░░░░░░░░░` 56% (19/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-13, T-14, T-15, T-16 (Sprint 2 client layer) — merged to `develop` via [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5), CI green.
-**In review:** T-17, T-18, T-19 — the full investigation pipeline (API + worker + SSE + live UI), delivered on branch `claude/zip-folder-review-y5th0x`. On merge **Sprint 2 is complete (7/7)**.
-**Next up:** Sprint 3 — T-20 (LangGraph skeleton & state) → the real agent. **Answer open questions #1–4 (ELK schema) before real query work.**
+**Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
+**In review:** T-20 (LangGraph skeleton & state) + T-21 (nodes 1–4: normalize → broad search → select → thread_walk — **the core deep dive**) + T-22 (redaction layer) + ADR-0002 (per-application integrations), all delivered on branch `claude/zip-folder-review-y5th0x` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
+**Next up:** T-23 (node 5: third-party probe) — depends on T-21 (in review).
 
-> ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
+> ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
 ### Blockers
 
@@ -80,17 +80,19 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 |---|---|---|---|
 | — | — | — | — |
 
+> **Resolved 2026-08-01:** ADR-0002 accepted (Option 1 — per-repo integrations) and implemented (`integrations.project_repo_id`, migration `a1b2c3d4e5f6`, per-repo config API/UI, `container.name` service field, per-project `elastic_ok`). T-21 unblocked.
+
 ### Open questions awaiting answers
 
 These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 
 | # | Question | Answer | Answered on |
 |---|---|---|---|
-| 1 | Does the ELK index have `@timestamp`? | | |
-| 2 | Is there a service/application field? | | |
-| 3 | Does `transaction_id` propagate across services? | | |
-| 4 | Index pattern: shared with service filter, or one per app? | | |
-| 5 | Sentry self-hosted or SaaS? Org slug? Releases tagged with git SHAs? | | |
+| 1 | Does the ELK index have `@timestamp`? | **Yes.** | 2026-08-01 |
+| 2 | Is there a service/application field? | **Each app has its own namespace/index (and its own Sentry account).** The in-log service field is **`container.name`**, not `service.name`. | 2026-08-01 |
+| 3 | Does `transaction_id` propagate across services? | **Backend only** — not across FE↔BE. | 2026-08-01 |
+| 4 | Index pattern: shared with service filter, or one per app? | **One index per app.** | 2026-08-01 |
+| 5 | Sentry self-hosted or SaaS? Org slug? Releases tagged with git SHAs? | **Self-hosted; each app (FE, BE) has its own Sentry account.** (Release/SHA tagging still to confirm.) | 2026-08-01 |
 | 6 | AppDynamics controller URL + OAuth API-client credentials available? | | |
 | 7 | Keycloak realm name; are FE and BE separate clients today? | Realm `taproot`; separate clients — `taproot-web` (public, PKCE) and `taproot-api` (bearer-only). Defined in T-06. | 2026-07-29 |
 | 8 | GPU allocation confirmed? (longest lead time) | | |
@@ -246,7 +248,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 - [x] Failure returns 422 carrying the **provider's actual error message**, and persists `status=FAILED` + `last_error`
 - [x] Token never appears in any response body (tested); write-only field, stored via `SecretStore`
 
-**Notes:** Connection-test success/failure paths tested end-to-end with a mocked provider HTTP layer. Full Elastic/Sentry/AppD data clients arrive in Sprint 2 (T-13–T-15); this task implements only the connection tests.
+**Notes:** Connection-test success/failure paths tested end-to-end with a mocked provider HTTP layer. Full Elastic/Sentry/AppD data clients arrive in Sprint 2 (T-13–T-15); this task implements only the connection tests. **Amended 2026-08-01 (ADR-0002):** integrations are now **per-repo** — endpoints moved under `/projects/{id}/repos/{repo_id}/integrations`.
 
 ---
 
@@ -260,7 +262,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 - [x] Existing tokens masked with a "replace" affordance; never rendered
 - [x] Project page warns clearly when Elastic is not `OK` — investigations disabled
 
-**Notes:** "Save disabled until a successful test" is inherently circular (the test needs the saved config), so it's implemented as a single **Save & test** action with a live status badge + inline provider error — the spirit of the requirement. `StatusBadge` unit-tested.
+**Notes:** "Save disabled until a successful test" is inherently circular (the test needs the saved config), so it's implemented as a single **Save & test** action with a live status badge + inline provider error — the spirit of the requirement. `StatusBadge` unit-tested. **Amended 2026-08-01 (ADR-0002):** the config UI is now **per app (repo)** — `ProjectDetailPage` renders integration forms per repo.
 
 ---
 
@@ -317,7 +319,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-17 · Investigation API & worker *(requirements 6, 8)*
-**Status:** `REVIEW` · **Depends:** T-13, T-03 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-13, T-03 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6) — merged
 
 - [x] `POST /investigations` → 202 + id, job enqueued to ARQ (`JobQueue` protocol)
 - [x] Rejects projects whose Elastic integration is not `OK` (422, clear message)
@@ -331,7 +333,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-18 · SSE streaming *(requirement 11)*
-**Status:** `REVIEW` · **Depends:** T-17 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-17 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6) — merged
 
 - [x] `GET /investigations/{id}/stream` per the event schema in `PLAN.md` §5.3
 - [x] Worker publishes to Redis (`EventBus`: `RedisEventBus`/`InMemoryEventBus`); api relays
@@ -346,7 +348,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-19 · Investigation UI *(requirements 6, 7, 8, 11)*
-**Status:** `REVIEW` · **Depends:** T-18, T-08 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-18, T-08 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6) — merged
 
 - [x] Project selector showing only projects with healthy Elastic (`useHealthyElasticProjects`)
 - [x] Error textarea + time-window picker + Submit
@@ -365,45 +367,45 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 > The highest-risk sprint. Budget roughly double Sprint 2. Write more tests here than anywhere else.
 
 ### T-20 · LangGraph skeleton & state
-**Status:** `TODO` · **Depends:** T-16, T-17 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-16, T-17 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `InvestigationState` per `ARCHITECTURE.md` §6.2
-- [ ] All 11 nodes wired, initially as stubs
-- [ ] Nodes 5–9 execute in parallel via a fan-out/fan-in branch
-- [ ] Parallel nodes write disjoint state fields (asserted in a test)
-- [ ] Node contract enforced: `step.start`, timeout, failure isolation, `step.finish`
-- [ ] A failing non-critical node does not fail the investigation (tested)
-- [ ] `AGENT_MAX_DURATION_S` cancels and returns partial results
+- [x] `InvestigationState` per `ARCHITECTURE.md` §6.2 (Annotated reducers for `node_errors`/`tokens_used`)
+- [x] All 11 nodes wired as stubs (+ `severity_score`), on a real LangGraph `StateGraph`
+- [x] Nodes 5–9 execute in parallel via fan-out from `thread_walk` / fan-in at `severity_score`
+- [x] Parallel nodes write disjoint state fields (asserted: all 5 fan-out fields populated)
+- [x] Node contract enforced by the `@node` decorator: `step.start`, per-node timeout, failure isolation, `step.finish`
+- [x] A failing non-critical node does not fail the investigation (tested); critical nodes abort (tested)
+- [x] `AGENT_MAX_DURATION_S` cancels via `astream` + deadline and returns partial results (tested)
 
-**Notes:**
+**Notes:** Real LangGraph (`StateGraph` over the Pydantic state). Nodes are **stubs** — bodies land in T-21–T-28; they live in one `agent/nodes.py` for the skeleton and split into `nodes/<name>.py` as implemented. The worker's `agent_runner` runs the graph, emits steps via `StepRecorder` (lock-guarded for the parallel nodes), and persists a stub `InvestigationResult`. Integration test: a real run streams all 12 node steps and persists a result.
 
 ---
 
 ### T-21 · Nodes 1–4: normalize, broad search, select threads, thread_walk ⭐
-**Status:** `TODO` · **Depends:** T-20, T-13 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-20, T-13 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
 
-- [ ] `normalize_query` extracts exception class, key tokens, service hint, time window
-- [ ] `elastic_broad_search` per `PLAN.md` §6.3; aborts the run cleanly on zero hits
-- [ ] `select_threads` ranks by recency + completeness + distinct users, caps at 5
-- [ ] `thread_walk` fetches all severities ASC and splits `preamble` / `error` / `aftermath`
-- [ ] Threads summarized to ≤400 tokens each before synthesis
-- [ ] Seeded-index test: correct chronological ordering, correct error index, preamble non-empty
-- [ ] Multi-service thread test: `services` list populated when txn crosses boundaries
+- [x] `normalize_query` extracts exception class, key tokens, service hint, time window
+- [x] `elastic_broad_search` per `PLAN.md` §6.3; aborts the run cleanly on zero hits
+- [x] `select_threads` ranks by recency + completeness + distinct users, caps at 5
+- [x] `thread_walk` fetches all severities ASC and splits `preamble` / `error` / `aftermath`
+- [x] Threads summarized to ≤400 tokens each before synthesis
+- [x] Seeded-index test: correct chronological ordering, correct error index, preamble non-empty
+- [x] Multi-service thread test: `services` list populated when txn crosses boundaries
 
-**Notes:**
+**Notes:** Nodes 1–4 are deterministic (no LLM yet — that lands with synthesis/redaction). The agent reasons over Elasticsearch through an `ElasticSearcher` **port** (`agent/context.py`), structurally satisfied by `integrations.elastic.ElasticClient`; the worker injects **one client per verified app** (ADR-0002) via `integration_service.elastic_clients_for_project`, keeping `agent` free of `db`/`integrations`. `elastic_broad_search` merges + de-dups transactions across apps and aborts only when **all** apps error (it's critical); **zero candidate transactions** routes via a new conditional edge straight to `synthesize` (clean "insufficient evidence" abort). `thread_walk` orders docs ASC, sets `error_index` at the first ERROR/FATAL/CRITICAL (preamble/aftermath are the slices around it), lists distinct services, hashes the username to a stable `user_<sha256[:8]>` (full redaction is T-22), and caps each summary at ~400 tokens. `transaction_id` is backend-only (Q3), so a walk reconstructs one app's thread; FE↔BE correlation is Phase-2.
 
 ---
 
 ### T-22 · Redaction layer
-**Status:** `TODO` · **Depends:** T-20 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-20 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
 
-- [ ] `core/redaction.py` implementing every pattern in `ARCHITECTURE.md` §8.3
-- [ ] Applied at **every** LLM boundary and before every persisted step payload
-- [ ] `user_name` → stable `user_<sha256[:8]>` (same input → same hash, for counting)
-- [ ] Test asserts `FakeLLM` never receives a raw username, email, token, or secret prefix
-- [ ] Test asserts no `investigation_steps.payload` contains unredacted PII
+- [x] `core/redaction.py` implementing every pattern in `ARCHITECTURE.md` §8.3
+- [x] Applied at **every** LLM boundary and before every persisted step payload
+- [x] `user_name` → stable `user_<sha256[:8]>` (same input → same hash, for counting)
+- [x] Test asserts `FakeLLM` never receives a raw username, email, token, or secret prefix
+- [x] Test asserts no `investigation_steps.payload` contains unredacted PII
 
-**Notes:**
+**Notes:** Extended the T-05 secret scrubber into the full §8.3 pipeline: `redact_text` (secrets → email local-part mask → credit-card/national-ID PII), `redact_value` (recursive JSON scrub that hashes `user_name`-like keys), `hash_user` (stable `user_<sha256[:8]>`, now the single source used by `thread_walk` too), and `redact_messages`. The LLM boundary is a `RedactingLLM` **wrapper** around the `LLM` protocol — the agent only ever holds the wrapped instance, so there is no bypass (verified with `FakeLLM.received`). `StepRecorder.finish` redacts `summary` and any `payload` **before** both persisting and publishing (SSE), so no raw PII lands in `investigation_steps` or reaches the browser. The `LLM.stream` protocol member changed from `async def` to `def` returning `AsyncIterator[str]` so wrappers can `async for` over it cleanly under `mypy --strict`.
 
 ---
 

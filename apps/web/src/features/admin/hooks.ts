@@ -15,8 +15,11 @@ export const useProject = (id: string) =>
 export const useRepos = (id: string) =>
   useQuery({ queryKey: ["repos", id], queryFn: () => api.listRepos(id) });
 
-export const useIntegrations = (id: string) =>
-  useQuery({ queryKey: ["integrations", id], queryFn: () => api.listIntegrations(id) });
+export const useIntegrations = (projectId: string, repoId: string) =>
+  useQuery({
+    queryKey: ["integrations", projectId, repoId],
+    queryFn: () => api.listIntegrations(projectId, repoId),
+  });
 
 export function useCreateProject() {
   const qc = useQueryClient();
@@ -46,19 +49,19 @@ export function useUpdateRepoKind(projectId: string) {
   });
 }
 
-export function usePutIntegration(projectId: string) {
+export function usePutIntegration(projectId: string, repoId: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (vars: { kind: IntegrationKind; body: IntegrationUpsert }) =>
-      api.putIntegration(projectId, vars.kind, vars.body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["integrations", projectId] }),
+      api.putIntegration(projectId, repoId, vars.kind, vars.body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["integrations", projectId, repoId] }),
   });
 }
 
-export function useTestIntegration(projectId: string) {
+export function useTestIntegration(projectId: string, repoId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (kind: IntegrationKind) => api.testIntegration(projectId, kind),
-    onSettled: () => qc.invalidateQueries({ queryKey: ["integrations", projectId] }),
+    mutationFn: (kind: IntegrationKind) => api.testIntegration(projectId, repoId, kind),
+    onSettled: () => qc.invalidateQueries({ queryKey: ["integrations", projectId, repoId] }),
   });
 }

@@ -57,8 +57,16 @@ async def test_connection(
 
 
 def _parse_doc(source: dict[str, Any]) -> LogDoc:
-    """Map an ES ``_source`` to a LogDoc, tolerating nested or flat fields."""
-    service = source.get("service.name")
+    """Map an ES ``_source`` to a LogDoc, tolerating nested or flat fields.
+
+    The operator's schema identifies the service via ``container.name`` (ADR-0002,
+    open question #2); we fall back to ``service.name`` for portability.
+    """
+    service = source.get("container.name")
+    if service is None and isinstance(source.get("container"), dict):
+        service = source["container"].get("name")
+    if service is None:
+        service = source.get("service.name")
     if service is None and isinstance(source.get("service"), dict):
         service = source["service"].get("name")
 
@@ -181,6 +189,7 @@ class ElasticClient:
                 "severity",
                 "message",
                 "stack_trace",
+                "container.name",
                 "service.name",
                 "user_name",
                 "transaction_id",

@@ -118,9 +118,6 @@ class Project(Base):
     repos: Mapped[list[ProjectRepo]] = relationship(
         back_populates="project", cascade="all, delete-orphan"
     )
-    integrations: Mapped[list[Integration]] = relationship(
-        back_populates="project", cascade="all, delete-orphan"
-    )
 
 
 class ProjectRepo(Base):
@@ -140,15 +137,23 @@ class ProjectRepo(Base):
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="repos")
+    integrations: Mapped[list[Integration]] = relationship(
+        back_populates="project_repo", cascade="all, delete-orphan"
+    )
 
 
 class Integration(Base):
+    """Per-application integration (ADR-0002): each app/repo has its own Elastic
+    index and Sentry account, so integrations attach to a ``project_repo``."""
+
     __tablename__ = "integrations"
-    __table_args__ = (UniqueConstraint("project_id", "kind", name="integrations_project_kind"),)
+    __table_args__ = (
+        UniqueConstraint("project_repo_id", "kind", name="integrations_project_repo_kind"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
-    project_id: Mapped[UUID] = mapped_column(
-        Uuid, ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    project_repo_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("project_repos.id", ondelete="CASCADE"), index=True
     )
     kind: Mapped[IntegrationKind] = mapped_column(_enum(IntegrationKind))
     external_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -162,7 +167,7 @@ class Integration(Base):
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    project: Mapped[Project] = relationship(back_populates="integrations")
+    project_repo: Mapped[ProjectRepo] = relationship(back_populates="integrations")
 
 
 class Investigation(Base):
