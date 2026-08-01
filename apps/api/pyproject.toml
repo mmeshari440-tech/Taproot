@@ -19,6 +19,7 @@ dependencies = [
     "python-jose[cryptography]>=3.3",
     "redis>=5.0",
     "arq>=0.25",
+    "langgraph>=1.2.10",
 ]
 
 [project.optional-dependencies]

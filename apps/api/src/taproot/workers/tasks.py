@@ -15,17 +15,27 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from taproot.agent.context import AgentContext
+from taproot.agent.graph import run_graph
+from taproot.agent.schemas import InvestigationResult as AgentResult
+from taproot.agent.schemas import OccurrenceStats
+from taproot.agent.state import InvestigationState
 from taproot.core.config import get_settings
 from taproot.core.events import EventBus, InMemoryEventBus, RedisEventBus
 from taproot.core.logging import get_logger
-from taproot.db.models import Investigation, InvestigationStatus, StepStatus
+from taproot.db.models import (
+    Investigation,
+    InvestigationResult,
+    InvestigationStatus,
+    Severity,
+    StepStatus,
+)
 from taproot.db.session import get_sessionmaker
 from taproot.workers.steps import StepRecorder
 
 _log = get_logger(__name__)
 
-# A runner performs the work, emitting steps via the recorder. Sprint 3 injects
-# the LangGraph agent; the default is a no-op stub.
+# A runner performs the work, emitting steps via the recorder.
 Runner = Callable[[Investigation, StepRecorder], Awaitable[None]]
 
 
@@ -33,15 +43,66 @@ async def _stub_runner(_investigation: Investigation, _recorder: StepRecorder) -
     return None
 
 
-async def demo_runner(investigation: Investigation, recorder: StepRecorder) -> None:
-    """Sprint-2 placeholder that streams a couple of fake steps so the SSE UI can
-    be built end-to-end. Replaced by the LangGraph agent in Sprint 3 (T-20)."""
-    for node, title in [
-        ("normalize_query", "Normalizing the error"),
-        ("elastic_broad_search", "Searching Elasticsearch"),
-    ]:
-        seq = await recorder.start(node, title)
-        await recorder.finish(seq, node, status=StepStatus.ok, summary=f"{node} complete")
+async def _persist_result(
+    recorder: StepRecorder, investigation: Investigation, final: dict[str, Any]
+) -> None:
+    investigation.token_usage = {"total": int(final.get("tokens_used", 0))}
+    raw = final.get("result")
+    if raw is None:
+        return
+    # `astream` keeps nested models as instances; coerce dicts too, for safety.
+    result = raw if isinstance(raw, AgentResult) else AgentResult(**raw)
+
+    series: list[dict[str, Any]] | None = None
+    stats_raw = final.get("stats")
+    if stats_raw is not None:
+        stats = (
+            stats_raw if isinstance(stats_raw, OccurrenceStats) else OccurrenceStats(**stats_raw)
+        )
+        series = [b.model_dump() for b in stats.series]
+
+    recorder.session.add(
+        InvestigationResult(
+            investigation_id=investigation.id,
+            severity=Severity(result.severity),
+            severity_rationale=result.severity_rationale,
+            confidence=result.confidence,
+            root_cause=result.root_cause,
+            root_cause_evidence=result.root_cause_evidence,
+            code_locations=[c.model_dump() for c in result.code_locations],
+            suggested_fixes=result.suggested_fixes,
+            third_party_involved=result.third_party_involved,
+            third_party_details=result.third_party_details,
+            occurrence_series=series,
+            raw_model_output=result.model_dump(),
+        )
+    )
+
+
+async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> None:
+    """Run the LangGraph agent (T-20). Node bodies are stubs until T-21+."""
+    settings = get_settings()
+
+    async def emit_start(node: str, title: str) -> int:
+        return await recorder.start(node, title)
+
+    async def emit_finish(seq: int, node: str, status: str, summary: str | None) -> None:
+        await recorder.finish(seq, node, status=StepStatus(status), summary=summary)
+
+    ctx = AgentContext(
+        emit_start=emit_start,
+        emit_finish=emit_finish,
+        node_timeout_s=settings.agent_node_timeout_s,
+        max_duration_s=settings.agent_max_duration_s,
+    )
+    state = InvestigationState(
+        investigation_id=investigation.id,
+        project_id=investigation.project_id,
+        error_text=investigation.error_text,
+        time_window_days=investigation.time_window_days,
+    )
+    final = await run_graph(state, ctx)
+    await _persist_result(recorder, investigation, final)
 
 
 async def execute_investigation(
@@ -122,7 +183,7 @@ async def run_investigation(ctx: dict[str, Any], investigation_id: str) -> None:
             UUID(investigation_id),
             job_try=int(ctx.get("job_try", 1)),
             max_tries=2,
-            runner=demo_runner,
+            runner=agent_runner,
             event_bus=_build_event_bus(),
         )
 

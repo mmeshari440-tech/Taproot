@@ -58,19 +58,19 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 |---|---|---|---|---|---|
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
-| 2 — Pipeline | 7 | 4 | 0 | 0 | 3 |
+| 2 — Pipeline | 7 | 7 | 0 | 0 | 0 |
 | 3 — Agent | 9 | 0 | 0 | 0 | 9 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **16** | **0** | **0** | **18** |
+| **Total** | **34** | **19** | **0** | **0** | **15** |
 
-**Overall progress:** `█████████░░░░░░░░░░░` 47% (16/34)
+**Overall progress:** `███████████░░░░░░░░░` 56% (19/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-13, T-14, T-15, T-16 (Sprint 2 client layer) — merged to `develop` via [PR #5](https://github.com/mmeshari440-tech/Taproot/pull/5), CI green.
-**In review:** T-17, T-18, T-19 — the full investigation pipeline (API + worker + SSE + live UI), delivered on branch `claude/zip-folder-review-y5th0x`. On merge **Sprint 2 is complete (7/7)**.
-**Next up:** Sprint 3 — T-20 (LangGraph skeleton & state) → the real agent. **Answer open questions #1–4 (ELK schema) before real query work.**
+**Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
+**In review:** T-20 — LangGraph skeleton & state (all 11 nodes wired as stubs, parallel fan-out, node contract, max-duration), delivered on branch `claude/zip-folder-review-y5th0x`.
+**Next up:** T-21 (nodes 1–4: normalize → broad search → select → thread_walk) — **the core.** ⚠️ Needs ELK open questions #1–4 answered.
 
 > ⚠️ **Sprint 2 assumption note:** open questions #1–4 (ELK schema) are still unanswered. The Elasticsearch client (T-13) is coded to the **documented** schema (`@timestamp`, `service.name`, `transaction_id`) with `# TODO: verify against live instance` markers and fixture tests, per the non-negotiable rule. Field mapping tolerates nested/flat shapes; confirm against a live index before Sprint 3.
 
@@ -317,7 +317,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-17 · Investigation API & worker *(requirements 6, 8)*
-**Status:** `REVIEW` · **Depends:** T-13, T-03 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-13, T-03 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6) — merged
 
 - [x] `POST /investigations` → 202 + id, job enqueued to ARQ (`JobQueue` protocol)
 - [x] Rejects projects whose Elastic integration is not `OK` (422, clear message)
@@ -331,7 +331,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-18 · SSE streaming *(requirement 11)*
-**Status:** `REVIEW` · **Depends:** T-17 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-17 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6) — merged
 
 - [x] `GET /investigations/{id}/stream` per the event schema in `PLAN.md` §5.3
 - [x] Worker publishes to Redis (`EventBus`: `RedisEventBus`/`InMemoryEventBus`); api relays
@@ -346,7 +346,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-19 · Investigation UI *(requirements 6, 7, 8, 11)*
-**Status:** `REVIEW` · **Depends:** T-18, T-08 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-18, T-08 · **Started:** 2026-07-31 · **Finished:** 2026-07-31 · **MR:** [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6) — merged
 
 - [x] Project selector showing only projects with healthy Elastic (`useHealthyElasticProjects`)
 - [x] Error textarea + time-window picker + Submit
@@ -365,17 +365,17 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 > The highest-risk sprint. Budget roughly double Sprint 2. Write more tests here than anywhere else.
 
 ### T-20 · LangGraph skeleton & state
-**Status:** `TODO` · **Depends:** T-16, T-17 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-16, T-17 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** branch `claude/zip-folder-review-y5th0x`
 
-- [ ] `InvestigationState` per `ARCHITECTURE.md` §6.2
-- [ ] All 11 nodes wired, initially as stubs
-- [ ] Nodes 5–9 execute in parallel via a fan-out/fan-in branch
-- [ ] Parallel nodes write disjoint state fields (asserted in a test)
-- [ ] Node contract enforced: `step.start`, timeout, failure isolation, `step.finish`
-- [ ] A failing non-critical node does not fail the investigation (tested)
-- [ ] `AGENT_MAX_DURATION_S` cancels and returns partial results
+- [x] `InvestigationState` per `ARCHITECTURE.md` §6.2 (Annotated reducers for `node_errors`/`tokens_used`)
+- [x] All 11 nodes wired as stubs (+ `severity_score`), on a real LangGraph `StateGraph`
+- [x] Nodes 5–9 execute in parallel via fan-out from `thread_walk` / fan-in at `severity_score`
+- [x] Parallel nodes write disjoint state fields (asserted: all 5 fan-out fields populated)
+- [x] Node contract enforced by the `@node` decorator: `step.start`, per-node timeout, failure isolation, `step.finish`
+- [x] A failing non-critical node does not fail the investigation (tested); critical nodes abort (tested)
+- [x] `AGENT_MAX_DURATION_S` cancels via `astream` + deadline and returns partial results (tested)
 
-**Notes:**
+**Notes:** Real LangGraph (`StateGraph` over the Pydantic state). Nodes are **stubs** — bodies land in T-21–T-28; they live in one `agent/nodes.py` for the skeleton and split into `nodes/<name>.py` as implemented. The worker's `agent_runner` runs the graph, emits steps via `StepRecorder` (lock-guarded for the parallel nodes), and persists a stub `InvestigationResult`. Integration test: a real run streams all 12 node steps and persists a result.
 
 ---
 

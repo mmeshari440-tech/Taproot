@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 import pytest
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from taproot.db.models import Investigation, InvestigationStatus, Project
+from taproot.core.events import InMemoryEventBus
+from taproot.db.models import (
+    Investigation,
+    InvestigationResult,
+    InvestigationStatus,
+    InvestigationStep,
+    Project,
+    Severity,
+)
 from taproot.workers.steps import StepRecorder
-from taproot.workers.tasks import execute_investigation
+from taproot.workers.tasks import agent_runner, execute_investigation
 
 
 async def _queued(session: AsyncSession) -> Investigation:
@@ -65,3 +74,28 @@ async def test_retry_then_fail(session: AsyncSession) -> None:
     await session.refresh(inv)
     assert inv.status == InvestigationStatus.FAILED
     assert inv.error is not None and "crashed" in inv.error
+
+
+async def test_agent_runner_streams_all_nodes_and_persists_result(session: AsyncSession) -> None:
+    inv = await _queued(session)
+    await execute_investigation(
+        session, inv.id, runner=agent_runner, event_bus=InMemoryEventBus()
+    )
+    await session.refresh(inv)
+    assert inv.status == InvestigationStatus.DONE
+
+    step_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(InvestigationStep)
+            .where(InvestigationStep.investigation_id == inv.id)
+        )
+    ).scalar_one()
+    assert step_count == 12  # all agent nodes emitted a step
+
+    result = (
+        await session.execute(
+            select(InvestigationResult).where(InvestigationResult.investigation_id == inv.id)
+        )
+    ).scalar_one()
+    assert result.severity == Severity.LOW

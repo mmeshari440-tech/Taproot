@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format loosely follows
 
 ## [Unreleased]
 
+### Sprint 3 — The agent (skeleton)
+
+- **T-20 LangGraph skeleton & state**: `InvestigationState` (ARCHITECTURE.md §6.2)
+  with reducers for `node_errors`/`tokens_used`; a real LangGraph `StateGraph`
+  wiring all 11 nodes (+ `severity_score`) as stubs — nodes 1→4 sequential, 5–9
+  fan-out/fan-in, then synthesize→verify. `@node` decorator enforces the node
+  contract (step.start, per-node timeout, failure isolation, step.finish); the two
+  critical nodes abort on failure. `run_graph` streams state and enforces the
+  max-duration budget (partial results on deadline). The worker's `agent_runner`
+  runs the graph, emits steps via a lock-guarded `StepRecorder`, and persists the
+  result. Node bodies are implemented in T-21+.
+
 ### Sprint 2 — Investigation pipeline (run engine)
 
 - **T-19 Investigation UI**: submit page (project selector limited to healthy-Elastic

@@ -6,6 +6,7 @@ DB-first ordering is what makes `Last-Event-ID` replay correct on reconnect
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -25,6 +26,12 @@ class StepRecorder:
         self._bus = event_bus
         self._inv_id = investigation_id
         self._seq = 0
+        # Parallel nodes (5–9) emit concurrently; serialize DB writes + seq.
+        self._lock = asyncio.Lock()
+
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
 
     async def _next_seq(self) -> int:
         if self._seq == 0:
@@ -45,21 +52,22 @@ class StepRecorder:
         await self._bus.publish(self._inv_id, event)
 
     async def start(self, node: str, title: str) -> int:
-        seq = await self._next_seq()
-        self._session.add(
-            InvestigationStep(
-                investigation_id=self._inv_id,
-                seq=seq,
-                node=node,
-                title=title,
-                status=StepStatus.running,
-                started_at=datetime.now(UTC),
+        async with self._lock:
+            seq = await self._next_seq()
+            self._session.add(
+                InvestigationStep(
+                    investigation_id=self._inv_id,
+                    seq=seq,
+                    node=node,
+                    title=title,
+                    status=StepStatus.running,
+                    started_at=datetime.now(UTC),
+                )
             )
-        )
-        await self._emit(
-            seq, {"type": "step.start", "seq": seq, "node": node, "title": title}
-        )
-        return seq
+            await self._emit(
+                seq, {"type": "step.start", "seq": seq, "node": node, "title": title}
+            )
+            return seq
 
     async def finish(
         self,
@@ -70,25 +78,26 @@ class StepRecorder:
         summary: str | None = None,
         metrics: dict[str, Any] | None = None,
     ) -> None:
-        step = (
-            await self._session.execute(
-                select(InvestigationStep).where(
-                    InvestigationStep.investigation_id == self._inv_id,
-                    InvestigationStep.seq == seq,
+        async with self._lock:
+            step = (
+                await self._session.execute(
+                    select(InvestigationStep).where(
+                        InvestigationStep.investigation_id == self._inv_id,
+                        InvestigationStep.seq == seq,
+                    )
                 )
+            ).scalar_one()
+            step.status = status
+            step.summary = summary
+            step.finished_at = datetime.now(UTC)
+            await self._emit(
+                seq,
+                {
+                    "type": "step.finish",
+                    "seq": seq,
+                    "node": node,
+                    "status": status.value,
+                    "summary": summary,
+                    "metrics": metrics or {},
+                },
             )
-        ).scalar_one()
-        step.status = status
-        step.summary = summary
-        step.finished_at = datetime.now(UTC)
-        await self._emit(
-            seq,
-            {
-                "type": "step.finish",
-                "seq": seq,
-                "node": node,
-                "status": status.value,
-                "summary": summary,
-                "metrics": metrics or {},
-            },
-        )
