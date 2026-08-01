@@ -19,6 +19,16 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 3 — The agent (deep dive)
 
+- **T-22 Redaction layer**: extended the T-05 secret scrubber into the full
+  `ARCHITECTURE.md` §8.3 pipeline — `redact_text` (secrets → email local-part mask
+  → credit-card/national-ID PII), `redact_value` (recursive JSON scrub that hashes
+  `user_name`-like keys), `hash_user` (stable `user_<sha256[:8]>`, now the single
+  source `thread_walk` uses too), and `redact_messages`. The LLM boundary is a
+  `RedactingLLM` wrapper around the `LLM` protocol, so the agent never holds a raw
+  model and there is no bypass. `StepRecorder.finish` redacts the summary and any
+  payload **before** persisting *and* publishing (SSE), keeping raw PII out of
+  `investigation_steps` and the browser. Tests assert `FakeLLM` never receives a raw
+  username/email/token/secret and that persisted step payloads are redacted.
 - **T-21 Nodes 1–4 (normalize → broad search → select → thread_walk)**: the core
   investigation path is now real. `normalize_query` deterministically extracts the
   exception class, key tokens, a service hint, and search variants. The agent reads

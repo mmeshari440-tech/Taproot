@@ -12,7 +12,6 @@ T-21–T-28. (They live here as one module for the skeleton; they split into
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime
@@ -33,6 +32,7 @@ from taproot.agent.schemas import (
 )
 from taproot.agent.state import InvestigationState
 from taproot.core.models import LogDoc
+from taproot.core.redaction import hash_user
 
 NodeBody = Callable[[InvestigationState, Any], Awaitable[dict[str, Any]]]
 GraphNode = Callable[[InvestigationState, RunnableConfig], Awaitable[dict[str, Any]]]
@@ -136,14 +136,6 @@ async def _fetch_thread(clients: Sequence[ElasticSearcher], txn_id: str) -> list
     return []
 
 
-def _hash_user(name: str | None) -> str | None:
-    """Stable pseudonym so distinct users can be counted without exposing PII.
-    (T-22 centralizes redaction; this keeps raw usernames out of state now.)"""
-    if not name:
-        return None
-    return "user_" + hashlib.sha256(name.encode()).hexdigest()[:8]
-
-
 def _truncate_tokens(text: str, max_tokens: int) -> str:
     max_chars = max_tokens * 4  # ~4 chars/token heuristic (no tokenizer in the agent layer)
     if len(text) <= max_chars:
@@ -185,7 +177,7 @@ def _build_thread(txn_id: str, docs: list[LogDoc]) -> LogThread:
         if doc.service and doc.service not in seen:
             seen.add(doc.service)
             services.append(doc.service)
-    user_hash = _hash_user(next((d.user_name for d in ordered if d.user_name), None))
+    user_hash = hash_user(next((d.user_name for d in ordered if d.user_name), None))
     return LogThread(
         txn_id=txn_id,
         docs=ordered,

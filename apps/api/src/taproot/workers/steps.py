@@ -15,6 +15,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.core.events import EventBus
+from taproot.core.redaction import redact_text, redact_value
 from taproot.db.models import InvestigationStep, StepStatus
 
 
@@ -77,7 +78,12 @@ class StepRecorder:
         status: StepStatus = StepStatus.ok,
         summary: str | None = None,
         metrics: dict[str, Any] | None = None,
+        payload: dict[str, Any] | None = None,
     ) -> None:
+        # Redact before both persisting and publishing — step summaries/payloads
+        # carry log excerpts (ARCHITECTURE.md §8.3, §4). No raw PII is stored.
+        safe_summary = redact_text(summary) if summary else summary
+        safe_payload = redact_value(payload) if payload is not None else None
         async with self._lock:
             step = (
                 await self._session.execute(
@@ -88,7 +94,9 @@ class StepRecorder:
                 )
             ).scalar_one()
             step.status = status
-            step.summary = summary
+            step.summary = safe_summary
+            if safe_payload is not None:
+                step.payload = safe_payload
             step.finished_at = datetime.now(UTC)
             await self._emit(
                 seq,
@@ -97,7 +105,7 @@ class StepRecorder:
                     "seq": seq,
                     "node": node,
                     "status": status.value,
-                    "summary": summary,
+                    "summary": safe_summary,
                     "metrics": metrics or {},
                 },
             )

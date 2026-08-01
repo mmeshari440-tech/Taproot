@@ -69,8 +69,8 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 **Currently in progress:** _none_
 **Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
-**In review:** T-20 (LangGraph skeleton & state) + T-21 (nodes 1–4: normalize → broad search → select → thread_walk — **the core deep dive**) + ADR-0002 (per-application integrations), all delivered on branch `claude/zip-folder-review-y5th0x` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
-**Next up:** T-22 (redaction layer) — depends on T-20 (in review).
+**In review:** T-20 (LangGraph skeleton & state) + T-21 (nodes 1–4: normalize → broad search → select → thread_walk — **the core deep dive**) + T-22 (redaction layer) + ADR-0002 (per-application integrations), all delivered on branch `claude/zip-folder-review-y5th0x` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
+**Next up:** T-23 (node 5: third-party probe) — depends on T-21 (in review).
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -397,15 +397,15 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-22 · Redaction layer
-**Status:** `TODO` · **Depends:** T-20 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-20 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
 
-- [ ] `core/redaction.py` implementing every pattern in `ARCHITECTURE.md` §8.3
-- [ ] Applied at **every** LLM boundary and before every persisted step payload
-- [ ] `user_name` → stable `user_<sha256[:8]>` (same input → same hash, for counting)
-- [ ] Test asserts `FakeLLM` never receives a raw username, email, token, or secret prefix
-- [ ] Test asserts no `investigation_steps.payload` contains unredacted PII
+- [x] `core/redaction.py` implementing every pattern in `ARCHITECTURE.md` §8.3
+- [x] Applied at **every** LLM boundary and before every persisted step payload
+- [x] `user_name` → stable `user_<sha256[:8]>` (same input → same hash, for counting)
+- [x] Test asserts `FakeLLM` never receives a raw username, email, token, or secret prefix
+- [x] Test asserts no `investigation_steps.payload` contains unredacted PII
 
-**Notes:**
+**Notes:** Extended the T-05 secret scrubber into the full §8.3 pipeline: `redact_text` (secrets → email local-part mask → credit-card/national-ID PII), `redact_value` (recursive JSON scrub that hashes `user_name`-like keys), `hash_user` (stable `user_<sha256[:8]>`, now the single source used by `thread_walk` too), and `redact_messages`. The LLM boundary is a `RedactingLLM` **wrapper** around the `LLM` protocol — the agent only ever holds the wrapped instance, so there is no bypass (verified with `FakeLLM.received`). `StepRecorder.finish` redacts `summary` and any `payload` **before** both persisting and publishing (SSE), so no raw PII lands in `investigation_steps` or reaches the browser. The `LLM.stream` protocol member changed from `async def` to `def` returning `AsyncIterator[str]` so wrappers can `async for` over it cleanly under `mypy --strict`.
 
 ---
 
