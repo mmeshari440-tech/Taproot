@@ -59,18 +59,17 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
 | 2 — Pipeline | 7 | 7 | 0 | 0 | 0 |
-| 3 — Agent | 9 | 0 | 0 | 0 | 9 |
+| 3 — Agent | 9 | 3 | 0 | 0 | 6 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **19** | **0** | **0** | **15** |
+| **Total** | **34** | **22** | **0** | **0** | **12** |
 
-**Overall progress:** `███████████░░░░░░░░░` 56% (19/34)
+**Overall progress:** `█████████████░░░░░░░` 65% (22/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
-**In review:** T-20 (LangGraph skeleton & state) + T-21 (nodes 1–4: normalize → broad search → select → thread_walk — **the core deep dive**) + T-22 (redaction layer) + ADR-0002 (per-application integrations), all delivered on branch `claude/zip-folder-review-y5th0x` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
-**Next up:** T-23 (node 5: third-party probe) — depends on T-21 (in review).
+**Last completed:** T-20, T-21, T-22 + ADR-0002 — the Sprint 3 agent core (skeleton, the deep-dive nodes, the redaction boundary) — merged to `develop` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
+**Next up:** T-23 (node 5: third-party probe) — depends on T-21 (`DONE`), now eligible.
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -367,7 +366,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 > The highest-risk sprint. Budget roughly double Sprint 2. Write more tests here than anywhere else.
 
 ### T-20 · LangGraph skeleton & state
-**Status:** `REVIEW` · **Depends:** T-16, T-17 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-16, T-17 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7) — merged
 
 - [x] `InvestigationState` per `ARCHITECTURE.md` §6.2 (Annotated reducers for `node_errors`/`tokens_used`)
 - [x] All 11 nodes wired as stubs (+ `severity_score`), on a real LangGraph `StateGraph`
@@ -382,7 +381,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-21 · Nodes 1–4: normalize, broad search, select threads, thread_walk ⭐
-**Status:** `REVIEW` · **Depends:** T-20, T-13 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
+**Status:** `DONE` · **Depends:** T-20, T-13 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7) — merged
 
 - [x] `normalize_query` extracts exception class, key tokens, service hint, time window
 - [x] `elastic_broad_search` per `PLAN.md` §6.3; aborts the run cleanly on zero hits
@@ -397,7 +396,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-22 · Redaction layer
-**Status:** `REVIEW` · **Depends:** T-20 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
+**Status:** `DONE` · **Depends:** T-20 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7) — merged
 
 - [x] `core/redaction.py` implementing every pattern in `ARCHITECTURE.md` §8.3
 - [x] Applied at **every** LLM boundary and before every persisted step payload
