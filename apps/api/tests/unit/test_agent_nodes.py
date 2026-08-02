@@ -17,8 +17,10 @@ from taproot.agent.nodes import (
     elastic_broad_search,
     normalize_query,
     select_threads,
+    third_party_probe,
     thread_walk,
 )
+from taproot.agent.schemas import LogThread
 from taproot.agent.state import InvestigationState
 from taproot.core.models import BroadSearchResult, LogDoc
 
@@ -180,3 +182,77 @@ async def test_thread_walk_skips_transactions_with_no_docs() -> None:
     fake = _FakeElastic(BroadSearchResult(), {"txn-1": [_doc(0, "ERROR", "x", "api")]})
     out = await thread_walk(_state(candidate_txn_ids=["txn-1", "missing"]), _config(_ctx([fake])))
     assert [t.txn_id for t in out["threads"]] == ["txn-1"]
+
+
+# --- third_party_probe (T-23) ----------------------------------------------
+def _thread(docs: list[LogDoc], error_index: int | None) -> LogThread:
+    return LogThread(txn_id="txn-1", docs=docs, error_index=error_index)
+
+
+async def _probe(docs: list[LogDoc], error_index: int | None = None) -> Any:
+    st = _state(threads=[_thread(docs, error_index)])
+    out = await third_party_probe(st, _config(_ctx([])))
+    return out["third_party"]
+
+
+async def test_third_party_gateway_timeout() -> None:
+    docs = [
+        _doc(0, "INFO", "calling https://api.partner.com/charge", "api"),
+        _doc(1, "ERROR", "504 Gateway Timeout from https://api.partner.com", "api"),
+    ]
+    finding = await _probe(docs, error_index=1)
+    assert finding.involved is True
+    assert "gateway timeout" in finding.symptom.lower()
+    assert finding.service == "api.partner.com"
+    assert finding.had_fallback is False
+
+
+async def test_third_party_connection_refused() -> None:
+    docs = [_doc(0, "ERROR", "ConnectException: Connection refused to payments-gw:8443", "api")]
+    finding = await _probe(docs, error_index=0)
+    assert finding.involved is True
+    assert "ConnectException" in finding.symptom
+
+
+async def test_third_party_partner_429() -> None:
+    docs = [_doc(0, "ERROR", "429 Too Many Requests from https://api.stripe.com", "api")]
+    finding = await _probe(docs, error_index=0)
+    assert finding.involved is True
+    assert finding.service == "api.stripe.com"
+
+
+async def test_third_party_http_status_field() -> None:
+    # Signal comes from the normalized http_status field, not the message text.
+    doc = LogDoc(severity="ERROR", message="upstream call failed", service="api", http_status=503)
+    finding = await _probe([doc], error_index=0)
+    assert finding.involved is True
+    assert "503" in finding.symptom
+
+
+async def test_internal_npe_is_not_third_party() -> None:
+    docs = [
+        _doc(0, "INFO", "request received", "api"),
+        _doc(1, "ERROR", "java.lang.NullPointerException at com.acme.Pay.charge", "api"),
+    ]
+    finding = await _probe(docs, error_index=1)
+    assert finding.involved is False
+    assert finding.service is None
+
+
+async def test_third_party_with_working_fallback() -> None:
+    docs = [
+        _doc(0, "ERROR", "SocketTimeoutException calling https://api.partner.com", "api"),
+        _doc(1, "WARN", "circuit breaker opened; serving from cache", "api"),
+        _doc(2, "INFO", "request completed", "api"),
+    ]
+    finding = await _probe(docs, error_index=0)
+    assert finding.involved is True
+    assert finding.had_fallback is True
+
+
+async def test_third_party_falls_back_to_broad_hits_when_no_threads() -> None:
+    st = _state(
+        broad_hits=[_doc(0, "ERROR", "UnknownHostException: api.partner.com", "api")],
+    )
+    out = await third_party_probe(st, _config(_ctx([])))
+    assert out["third_party"].involved is True

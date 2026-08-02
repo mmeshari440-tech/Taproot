@@ -19,6 +19,15 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 3 — The agent (deep dive)
 
+- **T-23 Node 5: third-party probe**: deterministic classification of our-bug vs.
+  third-party degradation. Scans the walked threads (or `broad_hits` as fallback)
+  for outbound-call failure signatures — client/timeout exceptions (`SocketTimeout`,
+  `ConnectException`, `UnknownHostException`, SSL handshake, …), partner HTTP
+  statuses (429/502/503/504 from the normalized `http_status` field or explicitly
+  labelled in text), and gateway phrases — while a bare internal `NullPointerException`
+  stays `involved=false`. Sets `third_party_involved` + service (external hostname
+  when present) + evidence, and detects whether a fallback/circuit-breaker/cache in
+  the aftermath absorbed the failure (swings severity per PLAN.md §7).
 - **T-22 Redaction layer**: extended the T-05 secret scrubber into the full
   `ARCHITECTURE.md` §8.3 pipeline — `redact_text` (secrets → email local-part mask
   → credit-card/national-ID PII), `redact_value` (recursive JSON scrub that hashes

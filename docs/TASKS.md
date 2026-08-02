@@ -68,8 +68,9 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-20, T-21, T-22 + ADR-0002 — the Sprint 3 agent core (skeleton, the deep-dive nodes, the redaction boundary) — merged to `develop` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
-**Next up:** T-23 (node 5: third-party probe) — depends on T-21 (`DONE`), now eligible.
+**Last completed:** T-20, T-21, T-22 + ADR-0002 — the Sprint 3 agent core — merged to `develop` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
+**In review:** T-23 (node 5: third-party probe) — delivered on branch `claude/zip-folder-review-y5th0x` (PR pending).
+**Next up:** T-24 (nodes 6–7: Sentry & AppDynamics enrichment) — depends on T-14, T-15, T-20 (all `DONE`).
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -409,14 +410,14 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-23 · Node 5: third-party probe
-**Status:** `TODO` · **Depends:** T-21 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-21 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
 
-- [ ] Detects outbound-call failure signatures: external hostnames, gateway timeouts, `SocketTimeout`, `ConnectException`, 429/5xx from partners
-- [ ] Sets `third_party_involved` + service name + evidence
-- [ ] Distinguishes "third-party failed, we had no fallback" from "third-party failed, fallback worked"
-- [ ] Fixture tests: gateway timeout ✓, connection refused ✓, partner 429 ✓, internal NPE → `false` ✓
+- [x] Detects outbound-call failure signatures: external hostnames, gateway timeouts, `SocketTimeout`, `ConnectException`, 429/5xx from partners
+- [x] Sets `third_party_involved` + service name + evidence
+- [x] Distinguishes "third-party failed, we had no fallback" from "third-party failed, fallback worked"
+- [x] Fixture tests: gateway timeout ✓, connection refused ✓, partner 429 ✓, internal NPE → `false` ✓
 
-**Notes:**
+**Notes:** Deterministic (no LLM). Scans the walked `threads` (falling back to `broad_hits` when none were walked) for outbound-call failure signatures: a set of client/timeout exceptions (`SocketTimeout`, `ConnectException`, `UnknownHostException`, SSL/handshake, …), partner HTTP statuses (429/502/503/504 from the normalized `http_status` field *or* explicitly labelled in text), and gateway phrases ("gateway timeout", "too many requests", …). An HTTP status only counts when labelled (`HTTP 503` / `status: 503`) so stray numbers don't false-positive — a plain internal `NullPointerException` stays `involved=false`. `service` prefers an external hostname parsed from a URL in the log line. `had_fallback` scans the **aftermath** (docs from `error_index` on) for fallback/circuit-breaker/cache/recovery signatures, which flips severity per PLAN.md §7 (outage w/o fallback +2, with fallback −1).
 
 ---
 

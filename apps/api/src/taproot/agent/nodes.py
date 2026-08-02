@@ -188,6 +188,64 @@ def _build_thread(txn_id: str, docs: list[LogDoc]) -> LogThread:
     )
 
 
+# --- helpers (node 5: third-party probe) ------------------------------------
+# Outbound-call failure exception signatures (PLAN.md req; ARCHITECTURE.md §6).
+_THIRD_PARTY_EXC_RE = re.compile(
+    r"\b(SocketTimeout(?:Exception)?|ConnectTimeout(?:Exception)?|ReadTimeout(?:Exception)?|"
+    r"ConnectException|ConnectionRefused(?:Error)?|ConnectionReset(?:Error)?|ConnectionError|"
+    r"TimeoutException|UnknownHostException|NoRouteToHostException|SSLHandshakeException|"
+    r"GatewayTimeout(?:Exception)?|BadGateway(?:Exception)?|ServiceUnavailable(?:Exception)?)\b"
+)
+# Downstream HTTP degradation phrases (partner 429 / gateway 5xx).
+_GATEWAY_PHRASE_RE = re.compile(
+    r"\b(gateway timeout|bad gateway|service unavailable|too many requests)\b", re.IGNORECASE
+)
+# An HTTP status only counts as a signal when explicitly labelled as one.
+_HTTP_STATUS_RE = re.compile(
+    r"(?:HTTP[\s/]*\d?\.?\d?\s*|status(?:\s*code)?[\s:=]+)(429|50[234])\b", re.IGNORECASE
+)
+_URL_HOST_RE = re.compile(r"https?://([A-Za-z0-9.-]+)")
+# The downstream recovered — a fallback/circuit-breaker/cache absorbed the failure.
+_FALLBACK_RE = re.compile(
+    r"\b(fell back|fall(?:ing|s)?\s*back|fallback|circuit[\s-]?breaker|"
+    r"serv(?:ing|ed)\s+(?:from\s+)?cache|using\s+cache|cached\s+response|"
+    r"using\s+default|default\s+value|degraded\s+gracefully|gracefully\s+degraded|"
+    r"retry\s+succeeded|recovered)\b",
+    re.IGNORECASE,
+)
+# HTTP statuses that, on an outbound call, indicate downstream (not our) failure.
+_PARTNER_STATUS = {429, 502, 503, 504}
+
+
+def _doc_text(doc: LogDoc) -> str:
+    return " ".join(part for part in (doc.message, doc.stack_trace) if part)
+
+
+def _match_third_party(doc: LogDoc) -> tuple[str, str, str | None] | None:
+    """Return ``(symptom, evidence, service)`` if this doc shows an outbound-call
+    failure, else ``None``. ``service`` prefers an external hostname in the text."""
+    text = _doc_text(doc)
+    host = (m.group(1) if (m := _URL_HOST_RE.search(text)) else None) or doc.service
+
+    if exc := _THIRD_PARTY_EXC_RE.search(text):
+        return (f"outbound call failure ({exc.group(1)})", text, host)
+    if doc.http_status in _PARTNER_STATUS:
+        symptom = f"HTTP {doc.http_status} from a downstream call"
+        return (symptom, text or symptom, host)
+    if phrase := _GATEWAY_PHRASE_RE.search(text):
+        return (f"downstream degradation ({phrase.group(1).lower()})", text, host)
+    if status := _HTTP_STATUS_RE.search(text):
+        return (f"HTTP {status.group(1)} from a downstream call", text, host)
+    return None
+
+
+def _has_fallback(docs: list[LogDoc], error_index: int | None) -> bool:
+    """A working fallback usually shows up *after* the failure (retries, cache,
+    circuit breaker), so scan the aftermath."""
+    tail = docs[error_index:] if error_index is not None else docs
+    return any(_FALLBACK_RE.search(_doc_text(doc)) for doc in tail)
+
+
 # --- nodes 1–4 --------------------------------------------------------------
 @node("normalize_query", "Normalizing the error")
 async def normalize_query(state: InvestigationState, _ctx: Any) -> dict[str, Any]:
@@ -285,8 +343,38 @@ async def thread_walk(state: InvestigationState, ctx: Any) -> dict[str, Any]:
 
 # --- nodes 5–9 (parallel — disjoint fields) ---------------------------------
 @node("third_party_probe", "Probing for third-party failures")
-async def third_party_probe(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"third_party": ThirdPartyFinding()}
+async def third_party_probe(state: InvestigationState, _ctx: Any) -> dict[str, Any]:
+    """Scan the walked threads for outbound-call failure signatures and classify
+    our-bug vs. third-party degradation. When a downstream failure is found, note
+    whether a fallback absorbed it (this swings severity, PLAN.md §7)."""
+    scan: list[tuple[list[LogDoc], int | None]] = [(t.docs, t.error_index) for t in state.threads]
+    if not scan and state.broad_hits:
+        scan = [(state.broad_hits, None)]
+
+    for docs, error_index in scan:
+        for doc in docs:
+            match = _match_third_party(doc)
+            if match is None:
+                continue
+            symptom, evidence, service = match
+            had_fallback = _has_fallback(docs, error_index)
+            finding = ThirdPartyFinding(
+                involved=True,
+                service=service,
+                symptom=symptom,
+                evidence=evidence[:500],
+                had_fallback=had_fallback,
+            )
+            outcome = "fallback worked" if had_fallback else "no fallback"
+            return {
+                "third_party": finding,
+                "_summary": f"third-party: {service or 'external'} — {symptom} ({outcome})",
+            }
+
+    return {
+        "third_party": ThirdPartyFinding(involved=False),
+        "_summary": "no third-party failure signature",
+    }
 
 
 @node("sentry_enrich", "Enriching from Sentry")
