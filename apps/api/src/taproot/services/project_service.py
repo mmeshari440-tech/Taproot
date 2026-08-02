@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from taproot.core.exceptions import NotFoundError
+from taproot.core.models import RepoRef
 from taproot.db.models import (
     AuditLog,
     Integration,
@@ -118,6 +119,27 @@ async def has_healthy_elastic(session: AsyncSession, project_id: UUID) -> bool:
         )
     ).scalar_one()
     return count > 0
+
+
+async def repo_refs_for_project(session: AsyncSession, project_id: UUID) -> list[RepoRef]:
+    """Flatten the project's repos into `RepoRef`s for the agent's `code_locate`
+    node (T-25), so the agent resolves frames→repo/ref without touching `db`."""
+    repos = (
+        (await session.execute(select(ProjectRepo).where(ProjectRepo.project_id == project_id)))
+        .scalars()
+        .all()
+    )
+    return [
+        RepoRef(
+            name=repo.name,
+            gitlab_project_id=repo.gitlab_project_id,
+            default_branch=repo.default_branch,
+            kind=repo.kind.value,
+            org_package_prefixes=repo.org_package_prefixes or [],
+            web_url=repo.web_url,
+        )
+        for repo in repos
+    ]
 
 
 async def get_project(session: AsyncSession, project_id: UUID) -> Project:

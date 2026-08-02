@@ -59,18 +59,18 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
 | 2 — Pipeline | 7 | 7 | 0 | 0 | 0 |
-| 3 — Agent | 9 | 3 | 0 | 0 | 6 |
+| 3 — Agent | 9 | 5 | 0 | 0 | 4 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **22** | **0** | **0** | **12** |
+| **Total** | **34** | **24** | **0** | **0** | **10** |
 
-**Overall progress:** `█████████████░░░░░░░` 65% (22/34)
+**Overall progress:** `██████████████░░░░░░` 71% (24/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-20, T-21, T-22 + ADR-0002 — the Sprint 3 agent core — merged to `develop` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
-**In review:** T-23 (third-party probe) via [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8); T-24 (Sentry & AppDynamics enrichment) on branch `claude/zip-folder-review-y5th0x` (PR pending).
-**Next up:** T-25 (node 8: code_locate ⭐) — depends on T-09, T-20 (both `DONE`).
+**Last completed:** T-23 (third-party probe) + T-24 (Sentry & AppDynamics enrichment) — merged to `develop` via [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8).
+**In review:** T-25 (node 8: code_locate ⭐) — delivered on branch `claude/zip-folder-review-y5th0x` (PR pending).
+**Next up:** T-26 (node 9: occurrence_stats) — depends on T-13 (`DONE`).
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -410,7 +410,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-23 · Node 5: third-party probe
-**Status:** `REVIEW` · **Depends:** T-21 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8)
+**Status:** `DONE` · **Depends:** T-21 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8) — merged
 
 - [x] Detects outbound-call failure signatures: external hostnames, gateway timeouts, `SocketTimeout`, `ConnectException`, 429/5xx from partners
 - [x] Sets `third_party_involved` + service name + evidence
@@ -422,7 +422,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-24 · Nodes 6–7: Sentry & AppDynamics enrichment
-**Status:** `REVIEW` · **Depends:** T-14, T-15, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
+**Status:** `DONE` · **Depends:** T-14, T-15, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8) — merged
 
 - [x] Both run in parallel with the other fan-out nodes
 - [x] Unconfigured or failing integration → `skipped` with a UI-visible reason, run continues
@@ -434,16 +434,16 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-25 · Node 8: code_locate ⭐ *(requirement 12.4)*
-**Status:** `TODO` · **Depends:** T-09, T-20 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-09, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
 
-- [ ] Parses frames from `stack_trace` and Sentry
-- [ ] Filters to in-app frames using per-project `org_package_prefixes`
-- [ ] Resolves repo via `project_repos`; resolves ref from Sentry release SHA, else default branch (with lower confidence flagged)
-- [ ] Fetches the file from GitLab at that ref, extracts ±25 lines
-- [ ] Returns ≤5 ranked locations with a `why` for each
-- [ ] Handles: file missing at ref, unregistered repo, minified FE frames, path-prefix mismatch — each with an explicit test
+- [x] Parses frames from `stack_trace` and Sentry
+- [x] Filters to in-app frames using per-project `org_package_prefixes`
+- [x] Resolves repo via `project_repos`; resolves ref from Sentry release SHA, else default branch (with lower confidence flagged)
+- [x] Fetches the file from GitLab at that ref, extracts ±25 lines
+- [x] Returns ≤5 ranked locations with a `why` for each
+- [x] Handles: file missing at ref, unregistered repo, minified FE frames, path-prefix mismatch — each with an explicit test
 
-**Notes:**
+**Notes:** Same port shape as the other nodes — a `CodeResolver` protocol in `agent/context.py` (repos + read-only GitLab file fetch), satisfied by `workers.code_resolver.GitLabCodeResolver`; the worker preloads `RepoRef`s via `project_service.repo_refs_for_project` (agent stays db/integrations-free). Frames come from Sentry (`in_app` flags) plus a best-effort stack-trace parser (Python/Java/JS shapes). In-app filter uses `frame.in_app` OR an `org_package_prefixes` match (dotted **and** slashed normalization). Ref = a git SHA found in the Sentry release (confidence 0.85) else `default_branch` (0.6). `_candidate_paths` tolerates monorepo leading segments (progressive strip) and Java package→path layout; a missing file falls back to the default branch, then reports the path with no snippet (confidence 0.25). Minified/bundled FE frames (`*.min.js`, hashed bundles) are skipped (source maps are Phase 2). In-app frames with no matching registered repo are reported as `(unregistered)` with no snippet. Top 5 ranked (snippet-bearing + confidence, else stack order). `code_resolver` is optional — absent (no GitLab config / no repos) → the node finishes `skipped`.
 
 ---
 

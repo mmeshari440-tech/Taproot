@@ -18,6 +18,7 @@ from taproot.core.models import (
     AppDErrorSnapshot,
     BroadSearchResult,
     LogDoc,
+    RepoRef,
     SentryEventDetail,
     SentryIssue,
 )
@@ -57,6 +58,16 @@ class AppDynamicsProbe(Protocol):
     async def metric_data(self, metric_path: str, *, duration_mins: int = 60) -> list[float]: ...
 
 
+@runtime_checkable
+class CodeResolver(Protocol):
+    """Port for ``code_locate`` (T-25): the project's registered repos plus a
+    read-only GitLab file fetch. Satisfied by ``workers.code_resolver``."""
+
+    def repos(self) -> Sequence[RepoRef]: ...
+
+    async def fetch_file(self, gitlab_project_id: int, path: str, ref: str) -> str | None: ...
+
+
 @dataclass
 class AgentContext:
     emit_start: EmitStart
@@ -70,6 +81,8 @@ class AgentContext:
     elastic_clients: Sequence[ElasticSearcher] = ()
     sentry_clients: Sequence[SentrySearcher] = ()
     appdynamics_clients: Sequence[AppDynamicsProbe] = ()
+    # Optional: absent when the project has no GitLab access (code_locate skips).
+    code_resolver: CodeResolver | None = None
 
 
 CONFIG_KEY = "ctx"
