@@ -19,6 +19,17 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 3 — The agent (deep dive)
 
+- **T-25 Node 8: code_locate** ⭐ (req 12.4): stack-trace/Sentry frames → source.
+  A `CodeResolver` port (`agent/context.py`) — the project's registered repos plus a
+  read-only GitLab file fetch — satisfied by `workers.code_resolver.GitLabCodeResolver`
+  over `RepoRef`s preloaded by `project_service.repo_refs_for_project` (agent stays
+  db/integrations-free). Parses Python/Java/JS frames, filters to in-app via
+  `frame.in_app` or `org_package_prefixes` (dotted+slashed), resolves the ref from a
+  git SHA in the Sentry release (else default branch, lower confidence), fetches the
+  file and extracts ±25 lines, returns ≤5 ranked locations with a `why`. Explicitly
+  handles file-missing-at-ref (fall back to default branch, then path-only), monorepo
+  path-prefix mismatch (progressive strip), minified/bundled FE frames (skipped), and
+  frames from unregistered repos (path, no snippet). No GitLab config → node skips.
 - **T-24 Nodes 6–7: Sentry & AppDynamics enrichment**: two fan-out nodes reusing
   the T-21 port/adapter shape — `SentrySearcher` / `AppDynamicsProbe` protocols in
   `agent/context.py`, one concrete client per verified app injected by the worker

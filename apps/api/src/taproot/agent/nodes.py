@@ -22,6 +22,7 @@ from langchain_core.runnables import RunnableConfig
 from taproot.agent.context import ElasticSearcher, ctx_from_config
 from taproot.agent.schemas import (
     AppDFinding,
+    CodeLocation,
     InvestigationResult,
     LogThread,
     OccurrenceStats,
@@ -31,7 +32,7 @@ from taproot.agent.schemas import (
     ThirdPartyFinding,
 )
 from taproot.agent.state import InvestigationState
-from taproot.core.models import ExitCall, LogDoc
+from taproot.core.models import ExitCall, Frame, LogDoc, RepoRef
 from taproot.core.redaction import hash_user
 
 NodeBody = Callable[[InvestigationState, Any], Awaitable[dict[str, Any]]]
@@ -507,9 +508,222 @@ async def appdynamics_enrich(state: InvestigationState, ctx: Any) -> dict[str, A
     }
 
 
+# --- helpers (node 8: code_locate) ------------------------------------------
+_CODE_SNIPPET_CONTEXT = 25
+_MAX_CODE_LOCATIONS = 5
+_GIT_SHA_RE = re.compile(r"\b[0-9a-f]{7,40}\b")
+_MINIFIED_RE = re.compile(r"(\.min\.js|\.[0-9a-f]{8,}\.(?:js|css)|bundle\.js)$", re.IGNORECASE)
+
+# Python: File "path", line N, in func
+_PY_FRAME_RE = re.compile(r'File "(?P<path>[^"]+)", line (?P<line>\d+)(?:, in (?P<func>\S+))?')
+# Java/Kotlin: at pkg.Class.method(File.java:NN)
+_JAVA_FRAME_RE = re.compile(
+    r"at\s+(?P<module>[\w.$]+)\.(?P<func>[\w$<>]+)\((?P<file>[^():]+?)(?::(?P<line>\d+))?\)"
+)
+# JS/TS: at fn (path:line:col)  |  at path:line:col  (two colons distinguish from Java)
+_JS_FRAME_RE = re.compile(
+    r"at\s+(?:(?P<func>[\w.$<>\[\]]+)\s+)?\(?(?P<path>[^\s()]+\.[a-z]{1,4}):(?P<line>\d+):\d+\)?"
+)
+
+
+def _parse_stack_frames(text: str) -> list[Frame]:
+    """Best-effort parse of a raw stack trace into frames (Python/Java/JS shapes).
+    ``# TODO: verify against live log formats``."""
+    frames: list[Frame] = []
+    for m in _PY_FRAME_RE.finditer(text):
+        frames.append(
+            Frame(filename=m.group("path"), function=m.group("func"), lineno=int(m.group("line")))
+        )
+    for m in _JAVA_FRAME_RE.finditer(text):
+        frames.append(
+            Frame(
+                filename=m.group("file"),
+                module=m.group("module"),
+                function=m.group("func"),
+                lineno=int(m.group("line")) if m.group("line") else None,
+            )
+        )
+    for m in _JS_FRAME_RE.finditer(text):
+        frames.append(
+            Frame(filename=m.group("path"), function=m.group("func"), lineno=int(m.group("line")))
+        )
+    return frames
+
+
+def _matches_prefix(frame: Frame, prefix: str) -> bool:
+    p = prefix.strip()
+    if not p:
+        return False
+    pn_dot = p.replace("/", ".").strip(".")
+    pn_slash = p.replace(".", "/").strip("/")
+    for raw in (frame.module, frame.filename, frame.abs_path):
+        if not raw:
+            continue
+        as_dot = raw.replace("/", ".")
+        as_slash = raw.replace(".", "/").lstrip("/")
+        if as_dot.startswith(pn_dot) or pn_dot in as_dot:
+            return True
+        if as_slash.startswith(pn_slash) or pn_slash in as_slash:
+            return True
+    return False
+
+
+def _is_in_app(frame: Frame, repos: list[RepoRef]) -> bool:
+    if frame.in_app:
+        return True
+    return any(_matches_prefix(frame, p) for repo in repos for p in repo.org_package_prefixes)
+
+
+def _match_repo(frame: Frame, repos: list[RepoRef]) -> RepoRef | None:
+    for repo in repos:
+        if any(_matches_prefix(frame, p) for p in repo.org_package_prefixes):
+            return repo
+    return None
+
+
+def _candidate_paths(frame: Frame) -> list[str]:
+    """Repo-relative paths to try, most-specific first — tolerating monorepo
+    leading segments and Java package→path layout (§6.5 path-prefix mismatch)."""
+    paths: list[str] = []
+    fn = frame.filename or frame.abs_path
+    if fn and "/" in fn.lstrip("/"):
+        p = fn.lstrip("/")
+        parts = p.split("/")
+        paths.extend("/".join(parts[i:]) for i in range(len(parts)))
+    elif fn and frame.module and "." in frame.module:
+        pkg = frame.module.rsplit(".", 1)[0].replace(".", "/")
+        for root in ("", "src/main/java/", "src/main/kotlin/", "src/"):
+            paths.append(f"{root}{pkg}/{fn}")
+    elif frame.module:
+        modpath = frame.module.replace(".", "/")
+        for root, ext in (("", ".java"), ("src/main/java/", ".java"), ("src/", ".py")):
+            paths.append(f"{root}{modpath}{ext}")
+    elif fn:
+        paths.append(fn.lstrip("/"))
+    return list(dict.fromkeys(paths))
+
+
+def _resolve_ref(sentry_release: str | None, repo: RepoRef) -> tuple[str, bool]:
+    """(ref, from_sha). Prefer a git SHA in the Sentry release; else default branch."""
+    if sentry_release and (m := _GIT_SHA_RE.search(sentry_release)):
+        return m.group(0), True
+    return repo.default_branch, False
+
+
+def _extract_snippet(content: str, lineno: int | None) -> str | None:
+    lines = content.splitlines()
+    if not lines:
+        return None
+    if lineno is None:
+        return "\n".join(lines[:_CODE_SNIPPET_CONTEXT])
+    idx = min(max(0, lineno - 1), len(lines) - 1)
+    start = max(0, idx - _CODE_SNIPPET_CONTEXT)
+    end = min(len(lines), idx + _CODE_SNIPPET_CONTEXT + 1)
+    return "\n".join(lines[start:end])
+
+
+def _rank_locations(locations: list[CodeLocation]) -> list[CodeLocation]:
+    # Stable: snippet-bearing + higher-confidence first, else stack order preserved.
+    return sorted(
+        locations, key=lambda c: (c.snippet is not None, c.confidence or 0.0), reverse=True
+    )
+
+
+async def _locate_frame(
+    resolver: Any, frame: Frame, repo: RepoRef, release: str | None
+) -> CodeLocation:
+    ref, from_sha = _resolve_ref(release, repo)
+    refs = list(dict.fromkeys([ref, repo.default_branch]))
+    for cand in _candidate_paths(frame):
+        for try_ref in refs:
+            content = await resolver.fetch_file(repo.gitlab_project_id, cand, try_ref)
+            if content is None:
+                continue
+            via_sha = from_sha and try_ref != repo.default_branch
+            why = f"in-app frame in {repo.name}"
+            if frame.function:
+                why += f" ({frame.function})"
+            why += f"; resolved at {'release SHA' if via_sha else 'default branch'} {try_ref}"
+            return CodeLocation(
+                repo=repo.name,
+                path=cand,
+                line=frame.lineno,
+                ref=try_ref,
+                snippet=_extract_snippet(content, frame.lineno),
+                why=why,
+                confidence=0.85 if via_sha else 0.6,
+            )
+    fallback_path = next(iter(_candidate_paths(frame)), frame.filename or frame.module or "")
+    return CodeLocation(
+        repo=repo.name,
+        path=fallback_path,
+        line=frame.lineno,
+        ref=ref,
+        snippet=None,
+        why=f"file not found in {repo.name} at {ref} (or default branch)",
+        confidence=0.25,
+    )
+
+
+def _gather_frames(state: InvestigationState) -> list[Frame]:
+    frames: list[Frame] = []
+    if state.sentry and not state.sentry.skipped:
+        frames.extend(state.sentry.frames)
+    texts = [state.error_text]
+    texts.extend(d.stack_trace for t in state.threads for d in t.docs if d.stack_trace)
+    for text in texts:
+        frames.extend(_parse_stack_frames(text))
+    return frames
+
+
 @node("code_locate", "Locating code")
-async def code_locate(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"code_locations": []}
+async def code_locate(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Frames (Sentry + parsed stack traces) → in-app filter (org prefixes) →
+    repo + ref resolution → GitLab file → ±25-line snippet, top 5 ranked (§6.5)."""
+    resolver = ctx.code_resolver
+    if resolver is None:
+        return {
+            "code_locations": [],
+            "_status": "skipped",
+            "_summary": "no GitLab access configured",
+        }
+
+    repos = list(resolver.repos())
+    release = state.sentry.release if state.sentry else None
+    locations: list[CodeLocation] = []
+    seen: set[tuple[str | None, int | None]] = set()
+
+    for frame in _gather_frames(state):
+        if not _is_in_app(frame, repos):
+            continue  # vendor/stdlib — discard
+        path_hint = frame.filename or frame.abs_path or frame.module or ""
+        if _MINIFIED_RE.search(path_hint):
+            continue  # minified/bundled FE frame — skip (source maps are Phase 2)
+        key = (path_hint, frame.lineno)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        repo = _match_repo(frame, repos)
+        if repo is None:
+            # In-app (per Sentry) but not in a registered repo → report path, no snippet.
+            locations.append(
+                CodeLocation(
+                    repo="(unregistered)",
+                    path=path_hint,
+                    line=frame.lineno,
+                    why="in-app frame but no registered repo matches its path",
+                    confidence=0.2,
+                )
+            )
+        else:
+            locations.append(await _locate_frame(resolver, frame, repo, release))
+
+        if len(locations) >= _MAX_CODE_LOCATIONS * 3:
+            break  # enough candidates to rank; avoid unbounded GitLab calls
+
+    ranked = _rank_locations(locations)[:_MAX_CODE_LOCATIONS]
+    return {"code_locations": ranked, "_summary": f"{len(ranked)} code location(s)"}
 
 
 @node("occurrence_stats", "Computing occurrence statistics")

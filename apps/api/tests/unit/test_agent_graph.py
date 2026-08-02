@@ -15,6 +15,7 @@ from taproot.core.models import (
     ExitCall,
     Frame,
     LogDoc,
+    RepoRef,
     SentryEventDetail,
     SentryIssue,
 )
@@ -65,6 +66,14 @@ class _FakeAppD:
         return [1.0, 2.0]
 
 
+class _FakeResolver:
+    def repos(self) -> list[RepoRef]:
+        return [RepoRef(name="be", gitlab_project_id=1, org_package_prefixes=["pay"])]
+
+    async def fetch_file(self, gitlab_project_id: int, path: str, ref: str) -> str | None:
+        return "\n".join(f"line{i}" for i in range(1, 60))
+
+
 class _Recorder:
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -93,6 +102,7 @@ class _Recorder:
             elastic_clients=[_FakeElastic()] if with_clients else [],
             sentry_clients=[_FakeSentry()] if with_clients else [],
             appdynamics_clients=[_FakeAppD()] if with_clients else [],
+            code_resolver=_FakeResolver() if with_clients else None,
         )
 
     def started(self) -> set[str]:

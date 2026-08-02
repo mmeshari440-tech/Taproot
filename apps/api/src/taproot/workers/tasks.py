@@ -16,7 +16,7 @@ from uuid import UUID
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from taproot.agent.context import AgentContext
+from taproot.agent.context import AgentContext, CodeResolver
 from taproot.agent.graph import run_graph
 from taproot.agent.schemas import InvestigationResult as AgentResult
 from taproot.agent.schemas import OccurrenceStats
@@ -33,7 +33,9 @@ from taproot.db.models import (
     StepStatus,
 )
 from taproot.db.session import get_sessionmaker
-from taproot.services import integration_service
+from taproot.integrations.gitlab import GitLabClient
+from taproot.services import integration_service, project_service
+from taproot.workers.code_resolver import GitLabCodeResolver
 from taproot.workers.steps import StepRecorder
 
 _log = get_logger(__name__)
@@ -120,6 +122,18 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
         appdynamics_clients = await integration_service.appdynamics_clients_for_project(
             recorder.session, project_id, secret_store=secret_store, http_client=http_client
         )
+
+        code_resolver: CodeResolver | None = None
+        if settings.gitlab_url and settings.gitlab_token:
+            repo_refs = await project_service.repo_refs_for_project(recorder.session, project_id)
+            if repo_refs:
+                code_resolver = GitLabCodeResolver(
+                    GitLabClient(
+                        settings.gitlab_url, settings.gitlab_token, http_client=http_client
+                    ),
+                    repo_refs,
+                )
+
         ctx = AgentContext(
             emit_start=emit_start,
             emit_finish=emit_finish,
@@ -128,6 +142,7 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
             elastic_clients=elastic_clients,
             sentry_clients=sentry_clients,
             appdynamics_clients=appdynamics_clients,
+            code_resolver=code_resolver,
         )
         state = InvestigationState(
             investigation_id=investigation.id,

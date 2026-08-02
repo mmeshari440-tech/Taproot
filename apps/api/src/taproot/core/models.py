@@ -42,6 +42,18 @@ class GitLabFile(BaseModel):
     content: str
 
 
+class RepoRef(BaseModel):
+    """A registered project repo, flattened for the agent's ``code_locate`` node
+    (T-25) so it can resolve frames → repo/ref without touching ``db``."""
+
+    name: str
+    gitlab_project_id: int
+    default_branch: str = "main"
+    kind: str = "OTHER"  # FE | BE | OTHER
+    org_package_prefixes: list[str] = []
+    web_url: str | None = None
+
+
 # --- Elasticsearch (T-13) ---------------------------------------------------
 class LogDoc(BaseModel):
     """One normalized log document. Field mapping assumes the documented ELK

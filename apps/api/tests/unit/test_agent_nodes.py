@@ -15,6 +15,7 @@ import pytest
 from taproot.agent.context import AgentContext
 from taproot.agent.nodes import (
     appdynamics_enrich,
+    code_locate,
     elastic_broad_search,
     normalize_query,
     select_threads,
@@ -22,7 +23,7 @@ from taproot.agent.nodes import (
     third_party_probe,
     thread_walk,
 )
-from taproot.agent.schemas import LogThread
+from taproot.agent.schemas import LogThread, SentryFinding
 from taproot.agent.state import InvestigationState
 from taproot.core.models import (
     AppDErrorSnapshot,
@@ -30,6 +31,7 @@ from taproot.core.models import (
     ExitCall,
     Frame,
     LogDoc,
+    RepoRef,
     SentryEventDetail,
     SentryIssue,
 )
@@ -86,6 +88,7 @@ def _ctx(
     max_threads: int = 5,
     sentry: list[Any] | None = None,
     appd: list[Any] | None = None,
+    resolver: Any = None,
 ) -> AgentContext:
     async def emit_start(_n: str, _t: str) -> int:
         return 1
@@ -100,6 +103,7 @@ def _ctx(
         elastic_clients=clients,
         sentry_clients=sentry or [],
         appdynamics_clients=appd or [],
+        code_resolver=resolver,
     )
 
 
@@ -372,3 +376,111 @@ async def test_appdynamics_enrich_skips_when_unconfigured() -> None:
     out = await appdynamics_enrich(_state(), _config(_ctx([])))
     assert out["appdynamics"].skipped is True
     assert "no AppDynamics integration" in out["appdynamics"].skip_reason
+
+
+# --- code_locate (T-25) -----------------------------------------------------
+_SRC = "\n".join(f"line{i}" for i in range(1, 101))  # 100-line file
+
+
+class _FakeResolver:
+    def __init__(self, repos: list[RepoRef], files: dict[str, str] | None = None) -> None:
+        self._repos = repos
+        self._files = files or {}
+        self.requested: list[tuple[str, str]] = []
+
+    def repos(self) -> list[RepoRef]:
+        return self._repos
+
+    async def fetch_file(self, gitlab_project_id: int, path: str, ref: str) -> str | None:
+        self.requested.append((path, ref))
+        return self._files.get(path)
+
+
+def _be_repo(**kw: Any) -> RepoRef:
+    base: dict[str, Any] = {
+        "name": "be-pay",
+        "gitlab_project_id": 7,
+        "default_branch": "main",
+        "org_package_prefixes": ["src/"],
+    }
+    base.update(kw)
+    return RepoRef(**base)
+
+
+async def _locate(state: InvestigationState, resolver: Any) -> list[Any]:
+    out = await code_locate(state, _config(_ctx([], resolver=resolver)))
+    return out["code_locations"]
+
+
+async def test_code_locate_happy_path_python_frame() -> None:
+    err = 'Traceback:\n  File "src/svc/payment.py", line 50, in charge\n    do_charge()'
+    resolver = _FakeResolver([_be_repo()], {"src/svc/payment.py": _SRC})
+    locs = await _locate(_state(error_text=err), resolver)
+    assert len(locs) == 1
+    loc = locs[0]
+    assert loc.repo == "be-pay"
+    assert loc.path == "src/svc/payment.py"
+    assert loc.line == 50
+    assert loc.ref == "main"
+    assert "line50" in loc.snippet
+    assert "line25" in loc.snippet and "line75" in loc.snippet  # ±25 window
+    assert loc.why
+
+
+async def test_code_locate_file_missing_reports_path_without_snippet() -> None:
+    err = '  File "src/svc/payment.py", line 50, in charge'
+    resolver = _FakeResolver([_be_repo()], files={})  # nothing resolves
+    locs = await _locate(_state(error_text=err), resolver)
+    assert len(locs) == 1
+    assert locs[0].snippet is None
+    assert "not found" in locs[0].why
+
+
+async def test_code_locate_unregistered_repo_reports_path_no_snippet() -> None:
+    sentry = SentryFinding(frames=[Frame(filename="vendor/thing.py", in_app=True, lineno=3)])
+    resolver = _FakeResolver([_be_repo()])  # prefix "src/" won't match "vendor/…"
+    locs = await _locate(_state(sentry=sentry), resolver)
+    assert len(locs) == 1
+    assert locs[0].repo == "(unregistered)"
+    assert locs[0].snippet is None
+
+
+async def test_code_locate_skips_minified_fe_frame() -> None:
+    sentry = SentryFinding(frames=[Frame(filename="static/main.abcdef12.js", in_app=True)])
+    resolver = _FakeResolver([_be_repo()])
+    locs = await _locate(_state(sentry=sentry), resolver)
+    assert locs == []
+
+
+async def test_code_locate_handles_monorepo_path_prefix_mismatch() -> None:
+    err = '  File "/monorepo/apps/web/src/pay.py", line 12, in run'
+    # The repo root only has src/pay.py — the leading monorepo segments must be stripped.
+    resolver = _FakeResolver([_be_repo()], {"src/pay.py": _SRC})
+    locs = await _locate(_state(error_text=err), resolver)
+    assert len(locs) == 1
+    assert locs[0].path == "src/pay.py"
+    assert locs[0].snippet is not None
+
+
+async def test_code_locate_uses_sentry_release_sha_as_ref() -> None:
+    sentry = SentryFinding(
+        frames=[Frame(filename="src/pay.py", in_app=True, lineno=10)],
+        release="be-pay@1.0.0+deadbeef",
+    )
+    resolver = _FakeResolver([_be_repo()], {"src/pay.py": _SRC})
+    locs = await _locate(_state(sentry=sentry), resolver)
+    assert locs[0].ref == "deadbeef"
+    assert locs[0].confidence == 0.85
+
+
+async def test_code_locate_skips_without_resolver() -> None:
+    out = await code_locate(_state(error_text="boom"), _config(_ctx([])))
+    assert out["code_locations"] == []
+
+
+async def test_code_locate_caps_at_five() -> None:
+    lines = "\n".join(f'  File "src/mod{i}.py", line {i}, in f' for i in range(1, 9))
+    files = {f"src/mod{i}.py": _SRC for i in range(1, 9)}
+    resolver = _FakeResolver([_be_repo()], files)
+    locs = await _locate(_state(error_text=lines), resolver)
+    assert len(locs) == 5
