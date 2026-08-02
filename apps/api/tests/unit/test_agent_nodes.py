@@ -14,13 +14,25 @@ import pytest
 
 from taproot.agent.context import AgentContext
 from taproot.agent.nodes import (
+    appdynamics_enrich,
     elastic_broad_search,
     normalize_query,
     select_threads,
+    sentry_enrich,
+    third_party_probe,
     thread_walk,
 )
+from taproot.agent.schemas import LogThread
 from taproot.agent.state import InvestigationState
-from taproot.core.models import BroadSearchResult, LogDoc
+from taproot.core.models import (
+    AppDErrorSnapshot,
+    BroadSearchResult,
+    ExitCall,
+    Frame,
+    LogDoc,
+    SentryEventDetail,
+    SentryIssue,
+)
 
 _THREAD_SUMMARY_CHARS = 400 * 4  # nodes._THREAD_SUMMARY_MAX_TOKENS * ~4 chars/token
 
@@ -68,14 +80,27 @@ class _BoomElastic:
         return []
 
 
-def _ctx(clients: list[Any], *, max_threads: int = 5) -> AgentContext:
+def _ctx(
+    clients: list[Any],
+    *,
+    max_threads: int = 5,
+    sentry: list[Any] | None = None,
+    appd: list[Any] | None = None,
+) -> AgentContext:
     async def emit_start(_n: str, _t: str) -> int:
         return 1
 
     async def emit_finish(_seq: int, _n: str, _s: str, _summary: str | None) -> None:
         return None
 
-    return AgentContext(emit_start, emit_finish, max_threads=max_threads, elastic_clients=clients)
+    return AgentContext(
+        emit_start,
+        emit_finish,
+        max_threads=max_threads,
+        elastic_clients=clients,
+        sentry_clients=sentry or [],
+        appdynamics_clients=appd or [],
+    )
 
 
 def _config(ctx: AgentContext) -> dict[str, Any]:
@@ -180,3 +205,170 @@ async def test_thread_walk_skips_transactions_with_no_docs() -> None:
     fake = _FakeElastic(BroadSearchResult(), {"txn-1": [_doc(0, "ERROR", "x", "api")]})
     out = await thread_walk(_state(candidate_txn_ids=["txn-1", "missing"]), _config(_ctx([fake])))
     assert [t.txn_id for t in out["threads"]] == ["txn-1"]
+
+
+# --- third_party_probe (T-23) ----------------------------------------------
+def _thread(docs: list[LogDoc], error_index: int | None) -> LogThread:
+    return LogThread(txn_id="txn-1", docs=docs, error_index=error_index)
+
+
+async def _probe(docs: list[LogDoc], error_index: int | None = None) -> Any:
+    st = _state(threads=[_thread(docs, error_index)])
+    out = await third_party_probe(st, _config(_ctx([])))
+    return out["third_party"]
+
+
+async def test_third_party_gateway_timeout() -> None:
+    docs = [
+        _doc(0, "INFO", "calling https://api.partner.com/charge", "api"),
+        _doc(1, "ERROR", "504 Gateway Timeout from https://api.partner.com", "api"),
+    ]
+    finding = await _probe(docs, error_index=1)
+    assert finding.involved is True
+    assert "gateway timeout" in finding.symptom.lower()
+    assert finding.service == "api.partner.com"
+    assert finding.had_fallback is False
+
+
+async def test_third_party_connection_refused() -> None:
+    docs = [_doc(0, "ERROR", "ConnectException: Connection refused to payments-gw:8443", "api")]
+    finding = await _probe(docs, error_index=0)
+    assert finding.involved is True
+    assert "ConnectException" in finding.symptom
+
+
+async def test_third_party_partner_429() -> None:
+    docs = [_doc(0, "ERROR", "429 Too Many Requests from https://api.stripe.com", "api")]
+    finding = await _probe(docs, error_index=0)
+    assert finding.involved is True
+    assert finding.service == "api.stripe.com"
+
+
+async def test_third_party_http_status_field() -> None:
+    # Signal comes from the normalized http_status field, not the message text.
+    doc = LogDoc(severity="ERROR", message="upstream call failed", service="api", http_status=503)
+    finding = await _probe([doc], error_index=0)
+    assert finding.involved is True
+    assert "503" in finding.symptom
+
+
+async def test_internal_npe_is_not_third_party() -> None:
+    docs = [
+        _doc(0, "INFO", "request received", "api"),
+        _doc(1, "ERROR", "java.lang.NullPointerException at com.acme.Pay.charge", "api"),
+    ]
+    finding = await _probe(docs, error_index=1)
+    assert finding.involved is False
+    assert finding.service is None
+
+
+async def test_third_party_with_working_fallback() -> None:
+    docs = [
+        _doc(0, "ERROR", "SocketTimeoutException calling https://api.partner.com", "api"),
+        _doc(1, "WARN", "circuit breaker opened; serving from cache", "api"),
+        _doc(2, "INFO", "request completed", "api"),
+    ]
+    finding = await _probe(docs, error_index=0)
+    assert finding.involved is True
+    assert finding.had_fallback is True
+
+
+async def test_third_party_falls_back_to_broad_hits_when_no_threads() -> None:
+    st = _state(
+        broad_hits=[_doc(0, "ERROR", "UnknownHostException: api.partner.com", "api")],
+    )
+    out = await third_party_probe(st, _config(_ctx([])))
+    assert out["third_party"].involved is True
+
+
+# --- sentry_enrich / appdynamics_enrich (T-24) ------------------------------
+class _FakeSentry:
+    def __init__(self, issues: list[SentryIssue], event: SentryEventDetail | None = None) -> None:
+        self._issues = issues
+        self._event = event
+
+    async def search_issues(self, query: str, *, limit: int = 10) -> list[SentryIssue]:
+        return self._issues
+
+    async def latest_event(self, issue_id: str) -> SentryEventDetail:
+        assert self._event is not None
+        return self._event
+
+
+class _FakeAppD:
+    def __init__(
+        self, snapshots: list[AppDErrorSnapshot], metrics: list[float] | None = None
+    ) -> None:
+        self._snapshots = snapshots
+        self._metrics = metrics or []
+
+    async def error_snapshots(self, *, duration_mins: int = 60) -> list[AppDErrorSnapshot]:
+        return self._snapshots
+
+    async def metric_data(self, metric_path: str, *, duration_mins: int = 60) -> list[float]:
+        return self._metrics
+
+
+async def test_sentry_enrich_populates_finding() -> None:
+    issue = SentryIssue(id="42", title="NPE", culprit="Pay.charge", user_count=7)
+    event = SentryEventDetail(
+        event_id="e1",
+        release="deadbeef",
+        frames=[Frame(filename="pay.py", in_app=True), Frame(filename="lib.py", in_app=False)],
+    )
+    ctx = _ctx([], sentry=[_FakeSentry([issue], event)])
+    out = await sentry_enrich(_state(), _config(ctx))
+    finding = out["sentry"]
+    assert finding.skipped is False
+    assert finding.issue_id == "42"
+    assert finding.culprit == "Pay.charge"
+    assert finding.release == "deadbeef"
+    assert finding.user_count == 7
+    assert any(f.in_app for f in finding.frames)
+
+
+async def test_sentry_enrich_skips_when_unconfigured() -> None:
+    out = await sentry_enrich(_state(), _config(_ctx([])))
+    assert out["sentry"].skipped is True
+    assert "no Sentry integration" in out["sentry"].skip_reason
+
+
+async def test_sentry_enrich_skips_on_no_match() -> None:
+    out = await sentry_enrich(_state(), _config(_ctx([], sentry=[_FakeSentry([])])))
+    assert out["sentry"].skipped is True
+    assert "no matching" in out["sentry"].skip_reason
+
+
+async def test_appdynamics_enrich_aggregates_exit_calls() -> None:
+    snaps = [
+        AppDErrorSnapshot(
+            id="s1", exit_calls=[ExitCall(target="db", call_type="JDBC", error_count=2)]
+        ),
+        AppDErrorSnapshot(
+            id="s2",
+            exit_calls=[
+                ExitCall(target="db", call_type="JDBC", error_count=3),
+                ExitCall(target="cache", call_type="HTTP", error_count=1),
+            ],
+        ),
+    ]
+    ctx = _ctx([], appd=[_FakeAppD(snaps, metrics=[2.0, 4.0])])
+    out = await appdynamics_enrich(_state(), _config(ctx))
+    finding = out["appdynamics"]
+    assert finding.skipped is False
+    assert finding.bt_health == "degraded"
+    assert finding.error_rate == 3.0  # mean of [2.0, 4.0]
+    top = finding.exit_calls[0]
+    assert top.target == "db" and top.error_count == 5  # merged across snapshots, ranked first
+
+
+async def test_appdynamics_enrich_healthy_when_no_snapshots() -> None:
+    out = await appdynamics_enrich(_state(), _config(_ctx([], appd=[_FakeAppD([])])))
+    assert out["appdynamics"].bt_health == "healthy"
+    assert out["appdynamics"].skipped is False
+
+
+async def test_appdynamics_enrich_skips_when_unconfigured() -> None:
+    out = await appdynamics_enrich(_state(), _config(_ctx([])))
+    assert out["appdynamics"].skipped is True
+    assert "no AppDynamics integration" in out["appdynamics"].skip_reason

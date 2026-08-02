@@ -59,18 +59,18 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
 | 2 — Pipeline | 7 | 7 | 0 | 0 | 0 |
-| 3 — Agent | 9 | 0 | 0 | 0 | 9 |
+| 3 — Agent | 9 | 3 | 0 | 0 | 6 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **19** | **0** | **0** | **15** |
+| **Total** | **34** | **22** | **0** | **0** | **12** |
 
-**Overall progress:** `███████████░░░░░░░░░` 56% (19/34)
+**Overall progress:** `█████████████░░░░░░░` 65% (22/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
 **Currently in progress:** _none_
-**Last completed:** T-17, T-18, T-19 — the investigation pipeline — merged to `develop` via [PR #6](https://github.com/mmeshari440-tech/Taproot/pull/6). **Sprint 2 complete (7/7).**
-**In review:** T-20 (LangGraph skeleton & state) + T-21 (nodes 1–4: normalize → broad search → select → thread_walk — **the core deep dive**) + T-22 (redaction layer) + ADR-0002 (per-application integrations), all delivered on branch `claude/zip-folder-review-y5th0x` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
-**Next up:** T-23 (node 5: third-party probe) — depends on T-21 (in review).
+**Last completed:** T-20, T-21, T-22 + ADR-0002 — the Sprint 3 agent core — merged to `develop` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
+**In review:** T-23 (third-party probe) via [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8); T-24 (Sentry & AppDynamics enrichment) on branch `claude/zip-folder-review-y5th0x` (PR pending).
+**Next up:** T-25 (node 8: code_locate ⭐) — depends on T-09, T-20 (both `DONE`).
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -367,7 +367,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 > The highest-risk sprint. Budget roughly double Sprint 2. Write more tests here than anywhere else.
 
 ### T-20 · LangGraph skeleton & state
-**Status:** `REVIEW` · **Depends:** T-16, T-17 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** branch `claude/zip-folder-review-y5th0x`
+**Status:** `DONE` · **Depends:** T-16, T-17 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7) — merged
 
 - [x] `InvestigationState` per `ARCHITECTURE.md` §6.2 (Annotated reducers for `node_errors`/`tokens_used`)
 - [x] All 11 nodes wired as stubs (+ `severity_score`), on a real LangGraph `StateGraph`
@@ -382,7 +382,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-21 · Nodes 1–4: normalize, broad search, select threads, thread_walk ⭐
-**Status:** `REVIEW` · **Depends:** T-20, T-13 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
+**Status:** `DONE` · **Depends:** T-20, T-13 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7) — merged
 
 - [x] `normalize_query` extracts exception class, key tokens, service hint, time window
 - [x] `elastic_broad_search` per `PLAN.md` §6.3; aborts the run cleanly on zero hits
@@ -397,7 +397,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-22 · Redaction layer
-**Status:** `REVIEW` · **Depends:** T-20 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7)
+**Status:** `DONE` · **Depends:** T-20 · **Started:** 2026-08-01 · **Finished:** 2026-08-01 · **MR:** [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7) — merged
 
 - [x] `core/redaction.py` implementing every pattern in `ARCHITECTURE.md` §8.3
 - [x] Applied at **every** LLM boundary and before every persisted step payload
@@ -410,26 +410,26 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-23 · Node 5: third-party probe
-**Status:** `TODO` · **Depends:** T-21 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-21 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8)
 
-- [ ] Detects outbound-call failure signatures: external hostnames, gateway timeouts, `SocketTimeout`, `ConnectException`, 429/5xx from partners
-- [ ] Sets `third_party_involved` + service name + evidence
-- [ ] Distinguishes "third-party failed, we had no fallback" from "third-party failed, fallback worked"
-- [ ] Fixture tests: gateway timeout ✓, connection refused ✓, partner 429 ✓, internal NPE → `false` ✓
+- [x] Detects outbound-call failure signatures: external hostnames, gateway timeouts, `SocketTimeout`, `ConnectException`, 429/5xx from partners
+- [x] Sets `third_party_involved` + service name + evidence
+- [x] Distinguishes "third-party failed, we had no fallback" from "third-party failed, fallback worked"
+- [x] Fixture tests: gateway timeout ✓, connection refused ✓, partner 429 ✓, internal NPE → `false` ✓
 
-**Notes:**
+**Notes:** Deterministic (no LLM). Scans the walked `threads` (falling back to `broad_hits` when none were walked) for outbound-call failure signatures: a set of client/timeout exceptions (`SocketTimeout`, `ConnectException`, `UnknownHostException`, SSL/handshake, …), partner HTTP statuses (429/502/503/504 from the normalized `http_status` field *or* explicitly labelled in text), and gateway phrases ("gateway timeout", "too many requests", …). An HTTP status only counts when labelled (`HTTP 503` / `status: 503`) so stray numbers don't false-positive — a plain internal `NullPointerException` stays `involved=false`. `service` prefers an external hostname parsed from a URL in the log line. `had_fallback` scans the **aftermath** (docs from `error_index` on) for fallback/circuit-breaker/cache/recovery signatures, which flips severity per PLAN.md §7 (outage w/o fallback +2, with fallback −1).
 
 ---
 
 ### T-24 · Nodes 6–7: Sentry & AppDynamics enrichment
-**Status:** `TODO` · **Depends:** T-14, T-15, T-20 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-14, T-15, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
 
-- [ ] Both run in parallel with the other fan-out nodes
-- [ ] Unconfigured or failing integration → `skipped` with a UI-visible reason, run continues
-- [ ] Sentry findings include in-app frames, release SHA, culprit, user count
-- [ ] AppD findings include BT health, error rate, exit calls for the window
+- [x] Both run in parallel with the other fan-out nodes
+- [x] Unconfigured or failing integration → `skipped` with a UI-visible reason, run continues
+- [x] Sentry findings include in-app frames, release SHA, culprit, user count
+- [x] AppD findings include BT health, error rate, exit calls for the window
 
-**Notes:**
+**Notes:** Same port/adapter shape as T-21 — `SentrySearcher` and `AppDynamicsProbe` protocols in `agent/context.py`, one concrete client per verified app injected by the worker (`sentry_clients_for_project`, `appdynamics_clients_for_project`; a shared `_verified_integrations` helper). `sentry_enrich` matches the top issue for the exception class and pulls culprit + user count + release SHA + in-app frames (frames feed T-25 code_locate). `appdynamics_enrich` aggregates exit-call error counts across error snapshots (ranked, top 10), derives `bt_health` (degraded/healthy) and a best-effort `error_rate` from the errors-per-minute metric. Added a `_status` sentinel to the `@node` decorator so an unconfigured/failing integration finishes as a real **`skipped`** step (ARCHITECTURE.md §6.3 pt 4) with a UI-visible `skip_reason`, and the run continues. Enrichment is best-effort: a raised integration error is caught and downgraded to `skipped` rather than a failed step.
 
 ---
 

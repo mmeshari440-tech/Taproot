@@ -31,7 +31,7 @@ from taproot.agent.schemas import (
     ThirdPartyFinding,
 )
 from taproot.agent.state import InvestigationState
-from taproot.core.models import LogDoc
+from taproot.core.models import ExitCall, LogDoc
 from taproot.core.redaction import hash_user
 
 NodeBody = Callable[[InvestigationState, Any], Awaitable[dict[str, Any]]]
@@ -56,7 +56,10 @@ def node(name: str, title: str, *, critical: bool = False) -> Callable[[NodeBody
                     raise
                 return {"node_errors": {name: str(exc)}}
             summary = str(update.pop("_summary", f"{name} complete"))
-            await ctx.emit_finish(seq, name, "ok", summary)
+            # Nodes may finish "skipped" (e.g. an unconfigured integration) via a
+            # sentinel; default is "ok" (ARCHITECTURE.md §6.3).
+            status = str(update.pop("_status", "ok"))
+            await ctx.emit_finish(seq, name, status, summary)
             return update
 
         wrapped.__name__ = name
@@ -188,6 +191,64 @@ def _build_thread(txn_id: str, docs: list[LogDoc]) -> LogThread:
     )
 
 
+# --- helpers (node 5: third-party probe) ------------------------------------
+# Outbound-call failure exception signatures (PLAN.md req; ARCHITECTURE.md §6).
+_THIRD_PARTY_EXC_RE = re.compile(
+    r"\b(SocketTimeout(?:Exception)?|ConnectTimeout(?:Exception)?|ReadTimeout(?:Exception)?|"
+    r"ConnectException|ConnectionRefused(?:Error)?|ConnectionReset(?:Error)?|ConnectionError|"
+    r"TimeoutException|UnknownHostException|NoRouteToHostException|SSLHandshakeException|"
+    r"GatewayTimeout(?:Exception)?|BadGateway(?:Exception)?|ServiceUnavailable(?:Exception)?)\b"
+)
+# Downstream HTTP degradation phrases (partner 429 / gateway 5xx).
+_GATEWAY_PHRASE_RE = re.compile(
+    r"\b(gateway timeout|bad gateway|service unavailable|too many requests)\b", re.IGNORECASE
+)
+# An HTTP status only counts as a signal when explicitly labelled as one.
+_HTTP_STATUS_RE = re.compile(
+    r"(?:HTTP[\s/]*\d?\.?\d?\s*|status(?:\s*code)?[\s:=]+)(429|50[234])\b", re.IGNORECASE
+)
+_URL_HOST_RE = re.compile(r"https?://([A-Za-z0-9.-]+)")
+# The downstream recovered — a fallback/circuit-breaker/cache absorbed the failure.
+_FALLBACK_RE = re.compile(
+    r"\b(fell back|fall(?:ing|s)?\s*back|fallback|circuit[\s-]?breaker|"
+    r"serv(?:ing|ed)\s+(?:from\s+)?cache|using\s+cache|cached\s+response|"
+    r"using\s+default|default\s+value|degraded\s+gracefully|gracefully\s+degraded|"
+    r"retry\s+succeeded|recovered)\b",
+    re.IGNORECASE,
+)
+# HTTP statuses that, on an outbound call, indicate downstream (not our) failure.
+_PARTNER_STATUS = {429, 502, 503, 504}
+
+
+def _doc_text(doc: LogDoc) -> str:
+    return " ".join(part for part in (doc.message, doc.stack_trace) if part)
+
+
+def _match_third_party(doc: LogDoc) -> tuple[str, str, str | None] | None:
+    """Return ``(symptom, evidence, service)`` if this doc shows an outbound-call
+    failure, else ``None``. ``service`` prefers an external hostname in the text."""
+    text = _doc_text(doc)
+    host = (m.group(1) if (m := _URL_HOST_RE.search(text)) else None) or doc.service
+
+    if exc := _THIRD_PARTY_EXC_RE.search(text):
+        return (f"outbound call failure ({exc.group(1)})", text, host)
+    if doc.http_status in _PARTNER_STATUS:
+        symptom = f"HTTP {doc.http_status} from a downstream call"
+        return (symptom, text or symptom, host)
+    if phrase := _GATEWAY_PHRASE_RE.search(text):
+        return (f"downstream degradation ({phrase.group(1).lower()})", text, host)
+    if status := _HTTP_STATUS_RE.search(text):
+        return (f"HTTP {status.group(1)} from a downstream call", text, host)
+    return None
+
+
+def _has_fallback(docs: list[LogDoc], error_index: int | None) -> bool:
+    """A working fallback usually shows up *after* the failure (retries, cache,
+    circuit breaker), so scan the aftermath."""
+    tail = docs[error_index:] if error_index is not None else docs
+    return any(_FALLBACK_RE.search(_doc_text(doc)) for doc in tail)
+
+
 # --- nodes 1–4 --------------------------------------------------------------
 @node("normalize_query", "Normalizing the error")
 async def normalize_query(state: InvestigationState, _ctx: Any) -> dict[str, Any]:
@@ -285,18 +346,165 @@ async def thread_walk(state: InvestigationState, ctx: Any) -> dict[str, Any]:
 
 # --- nodes 5–9 (parallel — disjoint fields) ---------------------------------
 @node("third_party_probe", "Probing for third-party failures")
-async def third_party_probe(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"third_party": ThirdPartyFinding()}
+async def third_party_probe(state: InvestigationState, _ctx: Any) -> dict[str, Any]:
+    """Scan the walked threads for outbound-call failure signatures and classify
+    our-bug vs. third-party degradation. When a downstream failure is found, note
+    whether a fallback absorbed it (this swings severity, PLAN.md §7)."""
+    scan: list[tuple[list[LogDoc], int | None]] = [(t.docs, t.error_index) for t in state.threads]
+    if not scan and state.broad_hits:
+        scan = [(state.broad_hits, None)]
+
+    for docs, error_index in scan:
+        for doc in docs:
+            match = _match_third_party(doc)
+            if match is None:
+                continue
+            symptom, evidence, service = match
+            had_fallback = _has_fallback(docs, error_index)
+            finding = ThirdPartyFinding(
+                involved=True,
+                service=service,
+                symptom=symptom,
+                evidence=evidence[:500],
+                had_fallback=had_fallback,
+            )
+            outcome = "fallback worked" if had_fallback else "no fallback"
+            return {
+                "third_party": finding,
+                "_summary": f"third-party: {service or 'external'} — {symptom} ({outcome})",
+            }
+
+    return {
+        "third_party": ThirdPartyFinding(involved=False),
+        "_summary": "no third-party failure signature",
+    }
+
+
+def _sentry_query(state: InvestigationState) -> str:
+    if state.signals and state.signals.exception_class:
+        return state.signals.exception_class
+    return state.error_text[:200]
 
 
 @node("sentry_enrich", "Enriching from Sentry")
-async def sentry_enrich(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"sentry": SentryFinding(skipped=True, skip_reason="stub")}
+async def sentry_enrich(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Match the error to a Sentry issue and pull in-app frames, release SHA,
+    culprit, and user count. Unconfigured/failing → ``skipped`` (run continues)."""
+    clients = ctx.sentry_clients
+    if not clients:
+        return {
+            "sentry": SentryFinding(skipped=True, skip_reason="no Sentry integration configured"),
+            "_status": "skipped",
+            "_summary": "no Sentry integration",
+        }
+
+    query = _sentry_query(state)
+    errors: list[str] = []
+    for client in clients:
+        try:
+            issues = await client.search_issues(query, limit=5)
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+        if not issues:
+            continue
+        top = issues[0]
+        release: str | None = None
+        frames = []
+        try:
+            event = await client.latest_event(top.id)
+            release = event.release
+            frames = event.frames
+        except Exception as exc:
+            errors.append(str(exc))
+        finding = SentryFinding(
+            issue_id=top.id,
+            culprit=top.culprit,
+            release=release,
+            user_count=top.user_count,
+            frames=frames,
+        )
+        in_app = sum(1 for f in frames if f.in_app)
+        return {
+            "sentry": finding,
+            "_summary": f"issue {top.id}: {top.culprit or top.title} ({in_app} in-app frame(s))",
+        }
+
+    if errors and len(errors) >= len(clients):
+        reason = "Sentry query failed: " + "; ".join(errors)
+        return {
+            "sentry": SentryFinding(skipped=True, skip_reason=reason),
+            "_status": "skipped",
+            "_summary": "Sentry unavailable",
+        }
+    return {
+        "sentry": SentryFinding(skipped=True, skip_reason="no matching Sentry issue"),
+        "_status": "skipped",
+        "_summary": "no matching Sentry issue",
+    }
 
 
 @node("appdynamics_enrich", "Enriching from AppDynamics")
-async def appdynamics_enrich(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"appdynamics": AppDFinding(skipped=True, skip_reason="stub")}
+async def appdynamics_enrich(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Pull BT health, error rate, and exit-call breakdown for the window.
+    Unconfigured/failing → ``skipped`` (run continues)."""
+    clients = ctx.appdynamics_clients
+    if not clients:
+        return {
+            "appdynamics": AppDFinding(
+                skipped=True, skip_reason="no AppDynamics integration configured"
+            ),
+            "_status": "skipped",
+            "_summary": "no AppDynamics integration",
+        }
+
+    window_mins = max(60, state.time_window_days * 24 * 60)
+    errors: list[str] = []
+    for client in clients:
+        try:
+            snapshots = await client.error_snapshots(duration_mins=window_mins)
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+
+        aggregated: dict[tuple[str, str | None], int] = {}
+        for snap in snapshots:
+            for call in snap.exit_calls:
+                key = (call.target, call.call_type)
+                aggregated[key] = aggregated.get(key, 0) + call.error_count
+        exit_calls = [
+            ExitCall(target=target, call_type=call_type, error_count=count)
+            for (target, call_type), count in sorted(
+                aggregated.items(), key=lambda kv: kv[1], reverse=True
+            )
+        ]
+
+        error_rate: float | None = None
+        try:
+            values = await client.metric_data(
+                "Overall Application Performance|Errors per Minute", duration_mins=window_mins
+            )
+            if values:
+                error_rate = sum(values) / len(values)
+        except Exception:  # noqa: S110 - the error-rate metric is optional enrichment
+            pass
+
+        finding = AppDFinding(
+            bt_health="degraded" if snapshots else "healthy",
+            error_rate=error_rate,
+            exit_calls=exit_calls[:10],
+        )
+        return {
+            "appdynamics": finding,
+            "_summary": f"{len(snapshots)} error snapshot(s), {len(exit_calls)} exit call(s)",
+        }
+
+    reason = "AppDynamics query failed: " + "; ".join(errors)
+    return {
+        "appdynamics": AppDFinding(skipped=True, skip_reason=reason),
+        "_status": "skipped",
+        "_summary": "AppDynamics unavailable",
+    }
 
 
 @node("code_locate", "Locating code")

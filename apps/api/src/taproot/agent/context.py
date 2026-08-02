@@ -14,7 +14,13 @@ from typing import Protocol, runtime_checkable
 
 from langchain_core.runnables import RunnableConfig
 
-from taproot.core.models import BroadSearchResult, LogDoc
+from taproot.core.models import (
+    AppDErrorSnapshot,
+    BroadSearchResult,
+    LogDoc,
+    SentryEventDetail,
+    SentryIssue,
+)
 
 # (node, title) -> seq
 EmitStart = Callable[[str, str], Awaitable[int]]
@@ -33,6 +39,24 @@ class ElasticSearcher(Protocol):
     async def thread(self, transaction_id: str, *, size: int = 500) -> list[LogDoc]: ...
 
 
+@runtime_checkable
+class SentrySearcher(Protocol):
+    """Port for the per-app Sentry client (T-24), satisfied by ``SentryClient``."""
+
+    async def search_issues(self, query: str, *, limit: int = 10) -> list[SentryIssue]: ...
+
+    async def latest_event(self, issue_id: str) -> SentryEventDetail: ...
+
+
+@runtime_checkable
+class AppDynamicsProbe(Protocol):
+    """Port for the per-app AppDynamics client (T-24), satisfied by ``AppDynamicsClient``."""
+
+    async def error_snapshots(self, *, duration_mins: int = 60) -> list[AppDErrorSnapshot]: ...
+
+    async def metric_data(self, metric_path: str, *, duration_mins: int = 60) -> list[float]: ...
+
+
 @dataclass
 class AgentContext:
     emit_start: EmitStart
@@ -40,10 +64,12 @@ class AgentContext:
     node_timeout_s: float = 45.0
     max_duration_s: float = 300.0
     max_threads: int = 5
-    # One searcher per app (ADR-0002: each app has its own index). Typed as a
-    # covariant Sequence so concrete clients (integrations.ElasticClient) assign
-    # cleanly without list-invariance friction.
+    # One client per app (ADR-0002: each app has its own index / Sentry account /
+    # AppD app). Typed as covariant Sequences so concrete integration clients
+    # assign cleanly without list-invariance friction.
     elastic_clients: Sequence[ElasticSearcher] = ()
+    sentry_clients: Sequence[SentrySearcher] = ()
+    appdynamics_clients: Sequence[AppDynamicsProbe] = ()
 
 
 CONFIG_KEY = "ctx"
