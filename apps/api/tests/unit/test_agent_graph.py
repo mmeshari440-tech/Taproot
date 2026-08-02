@@ -12,6 +12,7 @@ from taproot.agent.state import InvestigationState
 from taproot.core.models import (
     AppDErrorSnapshot,
     BroadSearchResult,
+    DayBucket,
     ExitCall,
     Frame,
     LogDoc,
@@ -40,6 +41,14 @@ class _FakeElastic:
 
     async def thread(self, transaction_id: str, *, size: int = 500) -> list[LogDoc]:
         return [LogDoc(severity="ERROR", message="boom", transaction_id=transaction_id)]
+
+    async def histogram(self, signature: str, *, window_days: int = 7) -> list[DayBucket]:
+        return [DayBucket(date="2026-08-01", count=1)]
+
+    async def cardinality(
+        self, signature: str, *, window_days: int = 7, field: str = "user_name"
+    ) -> int:
+        return 1
 
 
 class _FakeSentry:

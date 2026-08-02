@@ -17,6 +17,7 @@ from langchain_core.runnables import RunnableConfig
 from taproot.core.models import (
     AppDErrorSnapshot,
     BroadSearchResult,
+    DayBucket,
     LogDoc,
     RepoRef,
     SentryEventDetail,
@@ -38,6 +39,12 @@ class ElasticSearcher(Protocol):
     ) -> BroadSearchResult: ...
 
     async def thread(self, transaction_id: str, *, size: int = 500) -> list[LogDoc]: ...
+
+    async def histogram(self, signature: str, *, window_days: int = 7) -> list[DayBucket]: ...
+
+    async def cardinality(
+        self, signature: str, *, window_days: int = 7, field: str = "user_name"
+    ) -> int: ...
 
 
 @runtime_checkable

@@ -6,7 +6,7 @@ config carrying the :class:`AgentContext`), the same way LangGraph invokes them.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +18,7 @@ from taproot.agent.nodes import (
     code_locate,
     elastic_broad_search,
     normalize_query,
+    occurrence_stats,
     select_threads,
     sentry_enrich,
     third_party_probe,
@@ -28,6 +29,7 @@ from taproot.agent.state import InvestigationState
 from taproot.core.models import (
     AppDErrorSnapshot,
     BroadSearchResult,
+    DayBucket,
     ExitCall,
     Frame,
     LogDoc,
@@ -484,3 +486,71 @@ async def test_code_locate_caps_at_five() -> None:
     resolver = _FakeResolver([_be_repo()], files)
     locs = await _locate(_state(error_text=lines), resolver)
     assert len(locs) == 5
+
+
+# --- occurrence_stats (T-26) ------------------------------------------------
+class _HistElastic:
+    def __init__(self, buckets: list[DayBucket], users: int = 0) -> None:
+        self._buckets = buckets
+        self._users = users
+        self.hist_window: int | None = None
+        self.card_window: int | None = None
+
+    async def histogram(self, signature: str, *, window_days: int = 7) -> list[DayBucket]:
+        self.hist_window = window_days
+        return self._buckets
+
+    async def cardinality(
+        self, signature: str, *, window_days: int = 7, field: str = "user_name"
+    ) -> int:
+        self.card_window = window_days
+        return self._users
+
+
+async def test_occurrence_stats_fills_gaps_and_computes_wow() -> None:
+    today = datetime.now(UTC).date()
+
+    def iso(days_ago: int) -> str:
+        return (today - timedelta(days=days_ago)).isoformat()
+
+    # prior week (days 13,12) totals 4; this week (days 3,1) totals 10.
+    buckets = [
+        DayBucket(date=iso(13), count=1),
+        DayBucket(date=iso(12), count=3),
+        DayBucket(date=iso(3), count=6),
+        DayBucket(date=iso(1), count=4),
+    ]
+    fake = _HistElastic(buckets, users=5)
+    out = await occurrence_stats(_state(), _config(_ctx([fake])))
+    stats = out["stats"]
+
+    assert len(stats.series) == 7  # one bucket per day in the window
+    assert any(b.count == 0 for b in stats.series)  # zero-count days present (no gaps)
+    assert [b.date for b in stats.series] == [iso(d) for d in range(6, -1, -1)]  # chronological
+    assert stats.distinct_users == 5
+    assert stats.wow_delta == pytest.approx(1.5)  # (10 - 4) / 4
+    assert fake.hist_window == 14  # two weeks queried for WoW
+    assert fake.card_window == 7  # distinct users over the window
+
+
+async def test_occurrence_stats_wow_none_when_no_prior_week() -> None:
+    today = datetime.now(UTC).date()
+    buckets = [DayBucket(date=(today - timedelta(days=1)).isoformat(), count=3)]
+    out = await occurrence_stats(_state(), _config(_ctx([_HistElastic(buckets, users=2)])))
+    assert out["stats"].wow_delta is None  # prior week empty → no delta
+
+
+async def test_occurrence_stats_sums_across_apps() -> None:
+    today = datetime.now(UTC).date()
+    b = [DayBucket(date=today.isoformat(), count=2)]
+    out = await occurrence_stats(
+        _state(), _config(_ctx([_HistElastic(b, users=3), _HistElastic(b, users=4)]))
+    )
+    assert out["stats"].distinct_users == 7  # summed across apps
+    assert out["stats"].series[-1].count == 4  # today's counts merged (2 + 2)
+
+
+async def test_occurrence_stats_skips_without_clients() -> None:
+    out = await occurrence_stats(_state(), _config(_ctx([])))
+    assert out["stats"].series == []
+    assert out["stats"].distinct_users == 0
