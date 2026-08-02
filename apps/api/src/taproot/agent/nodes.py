@@ -14,7 +14,7 @@ from __future__ import annotations
 import asyncio
 import re
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -32,7 +32,7 @@ from taproot.agent.schemas import (
     ThirdPartyFinding,
 )
 from taproot.agent.state import InvestigationState
-from taproot.core.models import ExitCall, Frame, LogDoc, RepoRef
+from taproot.core.models import DayBucket, ExitCall, Frame, LogDoc, RepoRef
 from taproot.core.redaction import hash_user
 
 NodeBody = Callable[[InvestigationState, Any], Awaitable[dict[str, Any]]]
@@ -726,9 +726,73 @@ async def code_locate(state: InvestigationState, ctx: Any) -> dict[str, Any]:
     return {"code_locations": ranked, "_summary": f"{len(ranked)} code location(s)"}
 
 
+# --- helpers (node 9: occurrence_stats) -------------------------------------
+def _occurrence_signature(state: InvestigationState) -> str:
+    if state.signals and state.signals.exception_class:
+        return state.signals.exception_class
+    return state.error_text[:200]
+
+
+def _fill_series(counts: dict[str, int], *, end: date, days: int) -> list[DayBucket]:
+    """A bucket for **every** day in the window (zero-filled), so the chart has no
+    gaps (T-26)."""
+    series: list[DayBucket] = []
+    for offset in range(days - 1, -1, -1):
+        iso = (end - timedelta(days=offset)).isoformat()
+        series.append(DayBucket(date=iso, count=counts.get(iso, 0)))
+    return series
+
+
 @node("occurrence_stats", "Computing occurrence statistics")
-async def occurrence_stats(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"stats": OccurrenceStats()}
+async def occurrence_stats(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Daily occurrence histogram + distinct affected users + week-over-week delta
+    (requirement 12.1). Queries two windows so WoW has a prior week to compare."""
+    clients: Sequence[ElasticSearcher] = ctx.elastic_clients
+    if not clients:
+        return {
+            "stats": OccurrenceStats(),
+            "_status": "skipped",
+            "_summary": "no Elastic app configured",
+        }
+
+    window = state.signals.time_window_days if state.signals else state.time_window_days
+    span = window * 2  # need the prior week for the WoW delta
+    signature = _occurrence_signature(state)
+
+    counts: dict[str, int] = {}
+    distinct_users = 0
+    errors: list[str] = []
+    for client in clients:
+        try:
+            buckets = await client.histogram(signature, window_days=span)
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+        for bucket in buckets:
+            counts[bucket.date] = counts.get(bucket.date, 0) + bucket.count
+        try:
+            distinct_users += await client.cardinality(signature, window_days=window)
+        except Exception as exc:
+            errors.append(str(exc))
+
+    if errors and len(errors) >= len(clients):
+        return {
+            "stats": OccurrenceStats(),
+            "_status": "skipped",
+            "_summary": "occurrence stats unavailable",
+        }
+
+    full = _fill_series(counts, end=datetime.now(UTC).date(), days=span)
+    recent = full[-window:]
+    this_week = sum(b.count for b in recent)
+    prev_week = sum(b.count for b in full[:-window])
+    wow_delta = (this_week - prev_week) / prev_week if prev_week else None
+
+    stats = OccurrenceStats(series=recent, distinct_users=distinct_users, wow_delta=wow_delta)
+    return {
+        "stats": stats,
+        "_summary": f"{this_week} occurrence(s)/{window}d · {distinct_users} user(s)",
+    }
 
 
 # --- scoring + synthesis ----------------------------------------------------

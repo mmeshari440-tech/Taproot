@@ -69,8 +69,8 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 **Currently in progress:** _none_
 **Last completed:** T-23 (third-party probe) + T-24 (Sentry & AppDynamics enrichment) — merged to `develop` via [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8).
-**In review:** T-25 (node 8: code_locate ⭐) — delivered on branch `claude/zip-folder-review-y5th0x` (PR pending).
-**Next up:** T-26 (node 9: occurrence_stats) — depends on T-13 (`DONE`).
+**In review:** T-25 (node 8: code_locate ⭐) via [PR #9](https://github.com/mmeshari440-tech/Taproot/pull/9); T-26 (node 9: occurrence_stats) on branch `claude/zip-folder-review-y5th0x` (PR pending).
+**Next up:** T-27 (nodes 10–11: synthesize & verify — first real LLM use) — depends on T-22, T-25, T-26.
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -434,7 +434,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-25 · Node 8: code_locate ⭐ *(requirement 12.4)*
-**Status:** `REVIEW` · **Depends:** T-09, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
+**Status:** `REVIEW` · **Depends:** T-09, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #9](https://github.com/mmeshari440-tech/Taproot/pull/9)
 
 - [x] Parses frames from `stack_trace` and Sentry
 - [x] Filters to in-app frames using per-project `org_package_prefixes`
@@ -448,14 +448,14 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-26 · Node 9: occurrence_stats *(requirement 12.1)*
-**Status:** `TODO` · **Depends:** T-13 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-13 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
 
-- [ ] Daily `date_histogram` over the window → `occurrence_series`
-- [ ] Distinct affected users via `cardinality` on `user_name`
-- [ ] Week-over-week delta computed
-- [ ] Zero-count days present in the series (no gaps in the chart)
+- [x] Daily `date_histogram` over the window → `occurrence_series`
+- [x] Distinct affected users via `cardinality` on `user_name`
+- [x] Week-over-week delta computed
+- [x] Zero-count days present in the series (no gaps in the chart)
 
-**Notes:**
+**Notes:** Reads via the Elastic port (`histogram`/`cardinality` added to `ElasticSearcher`). Queries **two** windows (`window_days * 2`) so there's a prior week for the WoW delta, sums daily counts + distinct-user cardinality across a project's apps, then `_fill_series` zero-fills every day (relative to today) so the chart has no gaps. Returns the most-recent `window` days as `series`; `wow_delta = (this_week − prev_week) / prev_week` (None when the prior week is empty). No Elastic app / all apps error → `skipped`. Cross-app distinct-user counts are summed (a slight over-count when the same user hits multiple apps; exact for the common single-BE-app case) — `# TODO: revisit if cross-app user overlap matters`.
 
 ---
 

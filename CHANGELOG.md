@@ -19,6 +19,12 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 3 — The agent (deep dive)
 
+- **T-26 Node 9: occurrence_stats** (req 12.1): the 7-day chart data. Adds
+  `histogram`/`cardinality` to the `ElasticSearcher` port; queries two windows so
+  the week-over-week delta has a prior week, sums daily counts + distinct-user
+  cardinality across a project's apps, and zero-fills every day so the chart has no
+  gaps. Returns the recent `window` days as `series` with `distinct_users` and
+  `wow_delta` (None when the prior week is empty). No Elastic app → `skipped`.
 - **T-25 Node 8: code_locate** ⭐ (req 12.4): stack-trace/Sentry frames → source.
   A `CodeResolver` port (`agent/context.py`) — the project's registered repos plus a
   read-only GitLab file fetch — satisfied by `workers.code_resolver.GitLabCodeResolver`
