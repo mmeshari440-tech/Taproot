@@ -31,7 +31,7 @@ from taproot.agent.schemas import (
     ThirdPartyFinding,
 )
 from taproot.agent.state import InvestigationState
-from taproot.core.models import LogDoc
+from taproot.core.models import ExitCall, LogDoc
 from taproot.core.redaction import hash_user
 
 NodeBody = Callable[[InvestigationState, Any], Awaitable[dict[str, Any]]]
@@ -56,7 +56,10 @@ def node(name: str, title: str, *, critical: bool = False) -> Callable[[NodeBody
                     raise
                 return {"node_errors": {name: str(exc)}}
             summary = str(update.pop("_summary", f"{name} complete"))
-            await ctx.emit_finish(seq, name, "ok", summary)
+            # Nodes may finish "skipped" (e.g. an unconfigured integration) via a
+            # sentinel; default is "ok" (ARCHITECTURE.md §6.3).
+            status = str(update.pop("_status", "ok"))
+            await ctx.emit_finish(seq, name, status, summary)
             return update
 
         wrapped.__name__ = name
@@ -377,14 +380,131 @@ async def third_party_probe(state: InvestigationState, _ctx: Any) -> dict[str, A
     }
 
 
+def _sentry_query(state: InvestigationState) -> str:
+    if state.signals and state.signals.exception_class:
+        return state.signals.exception_class
+    return state.error_text[:200]
+
+
 @node("sentry_enrich", "Enriching from Sentry")
-async def sentry_enrich(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"sentry": SentryFinding(skipped=True, skip_reason="stub")}
+async def sentry_enrich(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Match the error to a Sentry issue and pull in-app frames, release SHA,
+    culprit, and user count. Unconfigured/failing → ``skipped`` (run continues)."""
+    clients = ctx.sentry_clients
+    if not clients:
+        return {
+            "sentry": SentryFinding(skipped=True, skip_reason="no Sentry integration configured"),
+            "_status": "skipped",
+            "_summary": "no Sentry integration",
+        }
+
+    query = _sentry_query(state)
+    errors: list[str] = []
+    for client in clients:
+        try:
+            issues = await client.search_issues(query, limit=5)
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+        if not issues:
+            continue
+        top = issues[0]
+        release: str | None = None
+        frames = []
+        try:
+            event = await client.latest_event(top.id)
+            release = event.release
+            frames = event.frames
+        except Exception as exc:
+            errors.append(str(exc))
+        finding = SentryFinding(
+            issue_id=top.id,
+            culprit=top.culprit,
+            release=release,
+            user_count=top.user_count,
+            frames=frames,
+        )
+        in_app = sum(1 for f in frames if f.in_app)
+        return {
+            "sentry": finding,
+            "_summary": f"issue {top.id}: {top.culprit or top.title} ({in_app} in-app frame(s))",
+        }
+
+    if errors and len(errors) >= len(clients):
+        reason = "Sentry query failed: " + "; ".join(errors)
+        return {
+            "sentry": SentryFinding(skipped=True, skip_reason=reason),
+            "_status": "skipped",
+            "_summary": "Sentry unavailable",
+        }
+    return {
+        "sentry": SentryFinding(skipped=True, skip_reason="no matching Sentry issue"),
+        "_status": "skipped",
+        "_summary": "no matching Sentry issue",
+    }
 
 
 @node("appdynamics_enrich", "Enriching from AppDynamics")
-async def appdynamics_enrich(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {"appdynamics": AppDFinding(skipped=True, skip_reason="stub")}
+async def appdynamics_enrich(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Pull BT health, error rate, and exit-call breakdown for the window.
+    Unconfigured/failing → ``skipped`` (run continues)."""
+    clients = ctx.appdynamics_clients
+    if not clients:
+        return {
+            "appdynamics": AppDFinding(
+                skipped=True, skip_reason="no AppDynamics integration configured"
+            ),
+            "_status": "skipped",
+            "_summary": "no AppDynamics integration",
+        }
+
+    window_mins = max(60, state.time_window_days * 24 * 60)
+    errors: list[str] = []
+    for client in clients:
+        try:
+            snapshots = await client.error_snapshots(duration_mins=window_mins)
+        except Exception as exc:
+            errors.append(str(exc))
+            continue
+
+        aggregated: dict[tuple[str, str | None], int] = {}
+        for snap in snapshots:
+            for call in snap.exit_calls:
+                key = (call.target, call.call_type)
+                aggregated[key] = aggregated.get(key, 0) + call.error_count
+        exit_calls = [
+            ExitCall(target=target, call_type=call_type, error_count=count)
+            for (target, call_type), count in sorted(
+                aggregated.items(), key=lambda kv: kv[1], reverse=True
+            )
+        ]
+
+        error_rate: float | None = None
+        try:
+            values = await client.metric_data(
+                "Overall Application Performance|Errors per Minute", duration_mins=window_mins
+            )
+            if values:
+                error_rate = sum(values) / len(values)
+        except Exception:  # noqa: S110 - the error-rate metric is optional enrichment
+            pass
+
+        finding = AppDFinding(
+            bt_health="degraded" if snapshots else "healthy",
+            error_rate=error_rate,
+            exit_calls=exit_calls[:10],
+        )
+        return {
+            "appdynamics": finding,
+            "_summary": f"{len(snapshots)} error snapshot(s), {len(exit_calls)} exit call(s)",
+        }
+
+    reason = "AppDynamics query failed: " + "; ".join(errors)
+    return {
+        "appdynamics": AppDFinding(skipped=True, skip_reason=reason),
+        "_status": "skipped",
+        "_summary": "AppDynamics unavailable",
+    }
 
 
 @node("code_locate", "Locating code")

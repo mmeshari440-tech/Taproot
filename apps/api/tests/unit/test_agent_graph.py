@@ -9,7 +9,15 @@ from taproot.agent.context import AgentContext
 from taproot.agent.graph import run_graph
 from taproot.agent.nodes import ALL_NODES, PARALLEL_NODES, node
 from taproot.agent.state import InvestigationState
-from taproot.core.models import BroadSearchResult, LogDoc
+from taproot.core.models import (
+    AppDErrorSnapshot,
+    BroadSearchResult,
+    ExitCall,
+    Frame,
+    LogDoc,
+    SentryEventDetail,
+    SentryIssue,
+)
 
 
 def _state() -> InvestigationState:
@@ -33,6 +41,30 @@ class _FakeElastic:
         return [LogDoc(severity="ERROR", message="boom", transaction_id=transaction_id)]
 
 
+class _FakeSentry:
+    async def search_issues(self, query: str, *, limit: int = 10) -> list[SentryIssue]:
+        return [SentryIssue(id="1", title="NPE", culprit="Pay.charge", user_count=3)]
+
+    async def latest_event(self, issue_id: str) -> SentryEventDetail:
+        return SentryEventDetail(
+            event_id="e1", release="abc123", frames=[Frame(filename="pay.py", in_app=True)]
+        )
+
+
+class _FakeAppD:
+    async def error_snapshots(self, *, duration_mins: int = 60) -> list[AppDErrorSnapshot]:
+        return [
+            AppDErrorSnapshot(
+                id="s1",
+                error_message="boom",
+                exit_calls=[ExitCall(target="db", call_type="JDBC", error_count=2)],
+            )
+        ]
+
+    async def metric_data(self, metric_path: str, *, duration_mins: int = 60) -> list[float]:
+        return [1.0, 2.0]
+
+
 class _Recorder:
     def __init__(self) -> None:
         self.events: list[tuple] = []
@@ -43,7 +75,7 @@ class _Recorder:
         *,
         node_timeout_s: float = 45.0,
         max_duration_s: float = 300.0,
-        with_elastic: bool = False,
+        with_clients: bool = False,
     ) -> AgentContext:
         async def emit_start(node_name: str, _title: str) -> int:
             self._seq += 1
@@ -58,7 +90,9 @@ class _Recorder:
             emit_finish,
             node_timeout_s,
             max_duration_s,
-            elastic_clients=[_FakeElastic()] if with_elastic else [],
+            elastic_clients=[_FakeElastic()] if with_clients else [],
+            sentry_clients=[_FakeSentry()] if with_clients else [],
+            appdynamics_clients=[_FakeAppD()] if with_clients else [],
         )
 
     def started(self) -> set[str]:
@@ -71,7 +105,7 @@ class _Recorder:
 # --- full graph -------------------------------------------------------------
 async def test_graph_runs_all_nodes_and_produces_result() -> None:
     rec = _Recorder()
-    final = await run_graph(_state(), rec.context(with_elastic=True))
+    final = await run_graph(_state(), rec.context(with_clients=True))
 
     # Every node emitted start + a successful finish.
     expected = {fn.__name__ for fn in ALL_NODES}
@@ -98,7 +132,7 @@ async def test_no_hits_skips_deep_dive_and_synthesizes() -> None:
 
 async def test_parallel_nodes_write_disjoint_fields() -> None:
     rec = _Recorder()
-    final = await run_graph(_state(), rec.context(with_elastic=True))
+    final = await run_graph(_state(), rec.context(with_clients=True))
     # All five fan-out fields populated → LangGraph merged disjoint updates cleanly.
     assert final["third_party"] is not None
     assert final["sentry"] is not None
@@ -140,6 +174,18 @@ async def test_failing_critical_node_raises() -> None:
 
     with pytest.raises(ValueError, match="fatal"):
         await crit(_state(), _config(rec.context()))
+
+
+async def test_node_can_finish_skipped_via_sentinel() -> None:
+    rec = _Recorder()
+
+    @node("skip", "Skip")
+    async def skip(_state: InvestigationState, _ctx: object) -> dict:
+        return {"_status": "skipped", "_summary": "nothing to do"}
+
+    result = await skip(_state(), _config(rec.context()))
+    assert result == {}  # sentinels are consumed by the decorator
+    assert ("finish", "skip", "skipped") in rec.events
 
 
 async def test_node_timeout_is_isolated() -> None:

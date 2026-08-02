@@ -69,8 +69,8 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 
 **Currently in progress:** _none_
 **Last completed:** T-20, T-21, T-22 + ADR-0002 — the Sprint 3 agent core — merged to `develop` via [PR #7](https://github.com/mmeshari440-tech/Taproot/pull/7).
-**In review:** T-23 (node 5: third-party probe) — delivered on branch `claude/zip-folder-review-y5th0x` (PR pending).
-**Next up:** T-24 (nodes 6–7: Sentry & AppDynamics enrichment) — depends on T-14, T-15, T-20 (all `DONE`).
+**In review:** T-23 (third-party probe) via [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8); T-24 (Sentry & AppDynamics enrichment) on branch `claude/zip-folder-review-y5th0x` (PR pending).
+**Next up:** T-25 (node 8: code_locate ⭐) — depends on T-09, T-20 (both `DONE`).
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -410,7 +410,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-23 · Node 5: third-party probe
-**Status:** `REVIEW` · **Depends:** T-21 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
+**Status:** `REVIEW` · **Depends:** T-21 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8)
 
 - [x] Detects outbound-call failure signatures: external hostnames, gateway timeouts, `SocketTimeout`, `ConnectException`, 429/5xx from partners
 - [x] Sets `third_party_involved` + service name + evidence
@@ -422,14 +422,14 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-24 · Nodes 6–7: Sentry & AppDynamics enrichment
-**Status:** `TODO` · **Depends:** T-14, T-15, T-20 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `REVIEW` · **Depends:** T-14, T-15, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
 
-- [ ] Both run in parallel with the other fan-out nodes
-- [ ] Unconfigured or failing integration → `skipped` with a UI-visible reason, run continues
-- [ ] Sentry findings include in-app frames, release SHA, culprit, user count
-- [ ] AppD findings include BT health, error rate, exit calls for the window
+- [x] Both run in parallel with the other fan-out nodes
+- [x] Unconfigured or failing integration → `skipped` with a UI-visible reason, run continues
+- [x] Sentry findings include in-app frames, release SHA, culprit, user count
+- [x] AppD findings include BT health, error rate, exit calls for the window
 
-**Notes:**
+**Notes:** Same port/adapter shape as T-21 — `SentrySearcher` and `AppDynamicsProbe` protocols in `agent/context.py`, one concrete client per verified app injected by the worker (`sentry_clients_for_project`, `appdynamics_clients_for_project`; a shared `_verified_integrations` helper). `sentry_enrich` matches the top issue for the exception class and pulls culprit + user count + release SHA + in-app frames (frames feed T-25 code_locate). `appdynamics_enrich` aggregates exit-call error counts across error snapshots (ranked, top 10), derives `bt_health` (degraded/healthy) and a best-effort `error_rate` from the errors-per-minute metric. Added a `_status` sentinel to the `@node` decorator so an unconfigured/failing integration finishes as a real **`skipped`** step (ARCHITECTURE.md §6.3 pt 4) with a UI-visible `skip_reason`, and the run continues. Enrichment is best-effort: a raised integration error is caught and downgraded to `skipped` rather than a failed step.
 
 ---
 

@@ -138,6 +138,28 @@ async def test_integration(
     return result
 
 
+async def _verified_integrations(
+    session: AsyncSession, project_id: UUID, kind: IntegrationKind
+) -> list[Integration]:
+    """All verified (status OK) integrations of ``kind`` across a project's apps
+    (ADR-0002: integrations are per-repo/app)."""
+    return list(
+        (
+            await session.execute(
+                select(Integration)
+                .join(ProjectRepo, Integration.project_repo_id == ProjectRepo.id)
+                .where(
+                    ProjectRepo.project_id == project_id,
+                    Integration.kind == kind,
+                    Integration.status == IntegrationStatus.OK,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 async def elastic_clients_for_project(
     session: AsyncSession,
     project_id: UUID,
@@ -148,29 +170,69 @@ async def elastic_clients_for_project(
     """Build a read-only Elastic client per verified app (ADR-0002: one index
     per app). The agent's ``thread_walk`` reasons over all of them; unverified or
     unconfigured apps are simply absent from the list."""
-    rows = (
-        (
-            await session.execute(
-                select(Integration)
-                .join(ProjectRepo, Integration.project_repo_id == ProjectRepo.id)
-                .where(
-                    ProjectRepo.project_id == project_id,
-                    Integration.kind == IntegrationKind.ELASTIC,
-                    Integration.status == IntegrationStatus.OK,
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
     clients: list[elastic.ElasticClient] = []
-    for integ in rows:
+    for integ in await _verified_integrations(session, project_id, IntegrationKind.ELASTIC):
         token = await secret_store.retrieve(integ.secret_ref) if integ.secret_ref else None
         clients.append(
             elastic.ElasticClient(
                 integ.base_url or "",
                 token,
                 integ.external_id or "*",
+                http_client=http_client,
+            )
+        )
+    return clients
+
+
+async def sentry_clients_for_project(
+    session: AsyncSession,
+    project_id: UUID,
+    *,
+    secret_store: SecretStore,
+    http_client: httpx.AsyncClient,
+) -> list[sentry.SentryClient]:
+    """One read-only Sentry client per verified app (ADR-0002: each app has its
+    own Sentry account). ``external_id``/config supplies ``<org>/<project>``."""
+    clients: list[sentry.SentryClient] = []
+    for integ in await _verified_integrations(session, project_id, IntegrationKind.SENTRY):
+        token = await secret_store.retrieve(integ.secret_ref) if integ.secret_ref else None
+        if not token:
+            continue
+        org = integ.config.get("org")
+        project = integ.config.get("project")
+        if (not org or not project) and integ.external_id and "/" in integ.external_id:
+            org, project = integ.external_id.split("/", 1)
+        if not org or not project:
+            continue
+        clients.append(
+            sentry.SentryClient(
+                integ.base_url or "", token, org, project, http_client=http_client
+            )
+        )
+    return clients
+
+
+async def appdynamics_clients_for_project(
+    session: AsyncSession,
+    project_id: UUID,
+    *,
+    secret_store: SecretStore,
+    http_client: httpx.AsyncClient,
+) -> list[appdynamics.AppDynamicsClient]:
+    """One read-only AppDynamics client per verified app. ``external_id`` is the
+    application id; ``config.client_id`` + the stored secret are OAuth credentials."""
+    clients: list[appdynamics.AppDynamicsClient] = []
+    for integ in await _verified_integrations(session, project_id, IntegrationKind.APPDYNAMICS):
+        secret = await secret_store.retrieve(integ.secret_ref) if integ.secret_ref else None
+        client_id = integ.config.get("client_id")
+        if not secret or not client_id or not integ.external_id:
+            continue
+        clients.append(
+            appdynamics.AppDynamicsClient(
+                integ.base_url or "",
+                client_id,
+                secret,
+                integ.external_id,
                 http_client=http_client,
             )
         )

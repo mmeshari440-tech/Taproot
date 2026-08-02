@@ -19,6 +19,16 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 3 — The agent (deep dive)
 
+- **T-24 Nodes 6–7: Sentry & AppDynamics enrichment**: two fan-out nodes reusing
+  the T-21 port/adapter shape — `SentrySearcher` / `AppDynamicsProbe` protocols in
+  `agent/context.py`, one concrete client per verified app injected by the worker
+  (`sentry_clients_for_project`, `appdynamics_clients_for_project`). `sentry_enrich`
+  matches the top issue for the exception class and captures culprit, user count,
+  release SHA, and in-app frames (feeds T-25); `appdynamics_enrich` aggregates
+  exit-call error counts across error snapshots, derives BT health, and a best-effort
+  error rate. Added a `_status` sentinel to the `@node` decorator so an
+  unconfigured/failing integration finishes as a real **`skipped`** step (with a
+  UI-visible reason) and the run continues.
 - **T-23 Node 5: third-party probe**: deterministic classification of our-bug vs.
   third-party degradation. Scans the walked threads (or `broad_hits` as fallback)
   for outbound-call failure signatures — client/timeout exceptions (`SocketTimeout`,

@@ -109,11 +109,16 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
 
     http_client = httpx.AsyncClient(timeout=30.0)
     try:
+        secret_store = _build_secret_store(settings)
+        project_id = investigation.project_id
         elastic_clients = await integration_service.elastic_clients_for_project(
-            recorder.session,
-            investigation.project_id,
-            secret_store=_build_secret_store(settings),
-            http_client=http_client,
+            recorder.session, project_id, secret_store=secret_store, http_client=http_client
+        )
+        sentry_clients = await integration_service.sentry_clients_for_project(
+            recorder.session, project_id, secret_store=secret_store, http_client=http_client
+        )
+        appdynamics_clients = await integration_service.appdynamics_clients_for_project(
+            recorder.session, project_id, secret_store=secret_store, http_client=http_client
         )
         ctx = AgentContext(
             emit_start=emit_start,
@@ -121,6 +126,8 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
             node_timeout_s=settings.agent_node_timeout_s,
             max_duration_s=settings.agent_max_duration_s,
             elastic_clients=elastic_clients,
+            sentry_clients=sentry_clients,
+            appdynamics_clients=appdynamics_clients,
         )
         state = InvestigationState(
             investigation_id=investigation.id,
