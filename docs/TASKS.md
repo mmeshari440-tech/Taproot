@@ -59,18 +59,18 @@ If `ARCHITECTURE.md` says something the codebase or an external API makes imposs
 | 0 — Foundations | 5 | 5 | 0 | 0 | 0 |
 | 1 — Auth & Admin | 7 | 7 | 0 | 0 | 0 |
 | 2 — Pipeline | 7 | 7 | 0 | 0 | 0 |
-| 3 — Agent | 9 | 5 | 0 | 0 | 4 |
+| 3 — Agent | 9 | 7 | 1 | 0 | 1 |
 | 4 — Results & Hardening | 6 | 0 | 0 | 0 | 6 |
-| **Total** | **34** | **24** | **0** | **0** | **10** |
+| **Total** | **34** | **26** | **1** | **0** | **7** |
 
-**Overall progress:** `██████████████░░░░░░` 71% (24/34)
+**Overall progress:** `███████████████░░░░░` 76% (26/34)
 
 > Progress bar: 20 cells, one cell ≈ 1.7 tasks. Fill `█` per completed cell.
 
-**Currently in progress:** _none_
-**Last completed:** T-23 (third-party probe) + T-24 (Sentry & AppDynamics enrichment) — merged to `develop` via [PR #8](https://github.com/mmeshari440-tech/Taproot/pull/8).
-**In review:** T-25 (node 8: code_locate ⭐) via [PR #9](https://github.com/mmeshari440-tech/Taproot/pull/9); T-26 (node 9: occurrence_stats) on branch `claude/zip-folder-review-y5th0x` (PR pending).
-**Next up:** T-27 (nodes 10–11: synthesize & verify — first real LLM use) — depends on T-22, T-25, T-26.
+**Currently in progress:** T-27 (nodes 10–11: synthesize & verify — first real LLM use)
+**Last completed:** T-25 (node 8: code_locate ⭐) via [PR #9](https://github.com/mmeshari440-tech/Taproot/pull/9) + T-26 (node 9: occurrence_stats) via [PR #10](https://github.com/mmeshari440-tech/Taproot/pull/10) — both merged to `develop`.
+**In review:** _none_
+**Next up:** T-28 (deterministic severity scorer) — depends on T-26, T-23 (both DONE); eligible once T-27 clears review.
 
 > ✅ **ELK/Sentry answers received (2026-08-01):** `@timestamp` ✓; service field is **`container.name`** (adopted in the Elastic client); each app has its **own index + Sentry account** → integrations are **per-repo** (ADR-0002, implemented); `transaction_id` is **backend-only** → `thread_walk` reconstructs backend threads (FE↔BE correlation is Phase-2). Sentry release/SHA tagging (affects T-25 precision) still to confirm.
 
@@ -434,7 +434,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-25 · Node 8: code_locate ⭐ *(requirement 12.4)*
-**Status:** `REVIEW` · **Depends:** T-09, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #9](https://github.com/mmeshari440-tech/Taproot/pull/9)
+**Status:** `DONE` · **Depends:** T-09, T-20 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #9](https://github.com/mmeshari440-tech/Taproot/pull/9) — merged
 
 - [x] Parses frames from `stack_trace` and Sentry
 - [x] Filters to in-app frames using per-project `org_package_prefixes`
@@ -448,7 +448,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-26 · Node 9: occurrence_stats *(requirement 12.1)*
-**Status:** `REVIEW` · **Depends:** T-13 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** branch `claude/zip-folder-review-y5th0x` (PR pending)
+**Status:** `DONE` · **Depends:** T-13 · **Started:** 2026-08-02 · **Finished:** 2026-08-02 · **MR:** [PR #10](https://github.com/mmeshari440-tech/Taproot/pull/10) — merged
 
 - [x] Daily `date_histogram` over the window → `occurrence_series`
 - [x] Distinct affected users via `cardinality` on `user_name`
@@ -460,7 +460,7 @@ These gate Sprint 2 (see `ARCHITECTURE.md` §12). Fill in as answers arrive.
 ---
 
 ### T-27 · Nodes 10–11: synthesize & verify
-**Status:** `TODO` · **Depends:** T-22, T-25, T-26 · **Started:** — · **Finished:** — · **MR:** —
+**Status:** `IN_PROGRESS` · **Depends:** T-22, T-25, T-26 · **Started:** 2026-08-16 · **Finished:** — · **MR:** —
 
 - [ ] Versioned Jinja prompts in `agent/prompts/`; no inline prompt strings
 - [ ] Output validated against the schema in `PLAN.md` §5.2

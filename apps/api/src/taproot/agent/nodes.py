@@ -12,27 +12,35 @@ T-21–T-28. (They live here as one module for the skeleton; they split into
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
+from pydantic import BaseModel, ValidationError
 
 from taproot.agent.context import ElasticSearcher, ctx_from_config
+from taproot.agent.prompts import render
 from taproot.agent.schemas import (
     AppDFinding,
     CodeLocation,
+    EvidenceItem,
     InvestigationResult,
     LogThread,
     OccurrenceStats,
     QuerySignals,
     SentryFinding,
+    SeverityLevel,
     SeverityScore,
+    SynthesizeOutput,
     ThirdPartyFinding,
+    VerifyCitation,
+    VerifyOutput,
 )
 from taproot.agent.state import InvestigationState
-from taproot.core.models import DayBucket, ExitCall, Frame, LogDoc, RepoRef
+from taproot.core.models import DayBucket, ExitCall, Frame, LLMMessage, LogDoc, RepoRef
 from taproot.core.redaction import hash_user
 
 NodeBody = Callable[[InvestigationState, Any], Awaitable[dict[str, Any]]]
@@ -795,6 +803,225 @@ async def occurrence_stats(state: InvestigationState, ctx: Any) -> dict[str, Any
     }
 
 
+# --- helpers (nodes 10-11: synthesize + verify) -----------------------------
+# Fixed headroom reserved out of ctx.max_tokens for instructions/schema/response
+# so the evidence block itself never crowds out the model's own output budget.
+_EVIDENCE_RESERVE_TOKENS = 4000
+# ARCHITECTURE.md §6.1: verify may loop back to synthesize at most once.
+MAX_VERIFY_RETRIES = 1
+# If more than this fraction of cited claims turn out unsupported, the
+# synthesis is judged too unreliable to salvage by dropping — retry once.
+_DROP_RETRY_THRESHOLD = 0.5
+
+
+class LLMJSONError(Exception):
+    """Raised when the LLM still hasn't produced schema-valid JSON after the
+    repair loop is exhausted. Carries the last raw output so the caller can
+    store it (ARCHITECTURE.md §6.7: never fabricate — fail loudly instead)."""
+
+    def __init__(self, raw_output: str, reason: str, attempts: int) -> None:
+        super().__init__(
+            f"LLM failed to produce valid JSON after {attempts} attempt(s): {reason}\n"
+            f"raw output: {raw_output}"
+        )
+        self.raw_output = raw_output
+
+
+_JSON_OBJECT_RE = re.compile(r"\{.*\}", re.DOTALL)
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    """Tolerate a model that wraps its JSON in prose or code fences."""
+    try:
+        result: dict[str, Any] = json.loads(text)
+        return result
+    except json.JSONDecodeError:
+        match = _JSON_OBJECT_RE.search(text)
+        if not match:
+            raise
+        result = json.loads(match.group(0))
+        return result
+
+
+async def _call_llm_json[M: BaseModel](
+    ctx: Any, system_prompt: str, user_prompt: str, schema_cls: type[M], *, max_repairs: int = 2
+) -> tuple[M, int]:
+    """One LLM call, validated against ``schema_cls`` with a JSON-repair retry
+    loop (ARCHITECTURE.md §6.7): on invalid JSON/schema mismatch, feed the bad
+    output + the validation error back and ask again, up to ``max_repairs``
+    times. Returns the validated object and the total tokens spent."""
+    if ctx.llm is None:
+        raise RuntimeError("no LLM client configured")
+
+    messages: list[LLMMessage] = [
+        LLMMessage(role="system", content=system_prompt),
+        LLMMessage(role="user", content=user_prompt),
+    ]
+    tokens = 0
+    attempts = max_repairs + 1
+    for attempt in range(attempts):
+        resp = await ctx.llm.complete(
+            messages, temperature=0.0, response_format={"type": "json_object"}
+        )
+        tokens += resp.usage.total_tokens
+        try:
+            data = _parse_json_object(resp.content)
+            return schema_cls.model_validate(data), tokens
+        except (json.JSONDecodeError, ValidationError) as exc:
+            if attempt >= max_repairs:
+                raise LLMJSONError(resp.content, str(exc), attempts) from exc
+            messages = [
+                *messages,
+                LLMMessage(role="assistant", content=resp.content),
+                LLMMessage(role="user", content=render("repair_v1.jinja2", error=str(exc))),
+            ]
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _evidence_from_state(state: InvestigationState) -> list[EvidenceItem]:
+    """Flatten every finding gathered so far into a numbered evidence list the
+    LLM can cite by id. Order is oldest-thread-first, then the single-shot
+    findings — this is also the order ``_fit_evidence_budget`` trims from."""
+    items: list[EvidenceItem] = []
+    for thread in state.threads:
+        ts = _aware(thread.docs[0].timestamp) if thread.docs else None
+        items.append(
+            EvidenceItem(
+                id=f"E{len(items) + 1}",
+                source="elastic",
+                ref=thread.txn_id,
+                excerpt=thread.summary
+                or _summarize_thread(
+                    thread.txn_id, thread.docs, thread.error_index, thread.services
+                ),
+                ts=ts,
+            )
+        )
+    if state.third_party and state.third_party.involved:
+        excerpt = (
+            f"{state.third_party.symptom} "
+            f"(service={state.third_party.service or 'unknown'}, "
+            f"fallback={'yes' if state.third_party.had_fallback else 'no'})"
+        )
+        items.append(
+            EvidenceItem(
+                id=f"E{len(items) + 1}", source="elastic", ref="third_party_probe", excerpt=excerpt
+            )
+        )
+    if state.sentry and not state.sentry.skipped:
+        excerpt = (
+            f"culprit={state.sentry.culprit or 'unknown'}; "
+            f"release={state.sentry.release or 'unknown'}; "
+            f"users={state.sentry.user_count if state.sentry.user_count is not None else 'unknown'}"
+        )
+        items.append(
+            EvidenceItem(
+                id=f"E{len(items) + 1}",
+                source="sentry",
+                ref=state.sentry.issue_id or "sentry",
+                excerpt=excerpt,
+            )
+        )
+    if state.appdynamics and not state.appdynamics.skipped:
+        top = ", ".join(f"{c.target}({c.error_count})" for c in state.appdynamics.exit_calls[:5])
+        excerpt = (
+            f"bt_health={state.appdynamics.bt_health or 'unknown'}; "
+            f"error_rate={state.appdynamics.error_rate}; "
+            f"top exit calls: {top or 'none'}"
+        )
+        items.append(
+            EvidenceItem(
+                id=f"E{len(items) + 1}",
+                source="appdynamics",
+                ref="appdynamics_enrich",
+                excerpt=excerpt,
+            )
+        )
+    for loc in state.code_locations:
+        excerpt = loc.why or "(no detail)"
+        if loc.snippet:
+            excerpt += "\n" + _truncate_tokens(loc.snippet, 150)
+        items.append(
+            EvidenceItem(
+                id=f"E{len(items) + 1}",
+                source="code",
+                ref=f"{loc.repo}:{loc.path}:{loc.line if loc.line is not None else '?'}",
+                excerpt=excerpt,
+            )
+        )
+    if state.stats and (state.stats.series or state.stats.distinct_users):
+        excerpt = (
+            f"{state.stats.distinct_users} distinct user(s) affected; "
+            f"week-over-week delta={state.stats.wow_delta}"
+        )
+        items.append(
+            EvidenceItem(
+                id=f"E{len(items) + 1}", source="elastic", ref="occurrence_stats", excerpt=excerpt
+            )
+        )
+    return items
+
+
+def _evidence_tokens(item: EvidenceItem) -> int:
+    return max(1, len(item.excerpt) // 4)  # ~4 chars/token heuristic, matches _truncate_tokens
+
+
+def _fit_evidence_budget(
+    items: list[EvidenceItem], budget_tokens: int
+) -> tuple[list[EvidenceItem], int]:
+    """Truncate evidence oldest-first until it fits ``budget_tokens``
+    (ARCHITECTURE.md §6.7). Dated items (thread evidence) are dropped oldest to
+    newest; undated single-shot findings are treated as "current" and dropped
+    last, only if the dated items alone still don't fit."""
+    total = sum(_evidence_tokens(i) for i in items)
+    if total <= budget_tokens or not items:
+        return items, 0
+
+    dated = sorted((i for i in items if i.ts is not None), key=lambda i: i.ts)  # type: ignore[arg-type,return-value]
+    undated = [i for i in items if i.ts is None]
+    drop_order = [*dated, *undated]
+
+    kept_ids = {i.id for i in items}
+    dropped = 0
+    for item in drop_order:
+        if total <= budget_tokens:
+            break
+        kept_ids.discard(item.id)
+        total -= _evidence_tokens(item)
+        dropped += 1
+
+    return [i for i in items if i.id in kept_ids], dropped
+
+
+_SEVERITY_ORDER: list[SeverityLevel] = ["LOW", "MEDIUM", "HIGH", "BLOCKER"]
+
+
+def _clamp_severity(proposed: SeverityLevel, baseline: SeverityLevel) -> SeverityLevel:
+    """The LLM may move severity by at most one level from the deterministic
+    score (ARCHITECTURE.md §6.6); anything further is clamped back."""
+    p, b = _SEVERITY_ORDER.index(proposed), _SEVERITY_ORDER.index(baseline)
+    if abs(p - b) <= 1:
+        return proposed
+    return _SEVERITY_ORDER[b + (1 if p > b else -1)]
+
+
+def _confidence_penalty(state: InvestigationState) -> float:
+    """Confidence is lowered — deterministically, not by asking the LLM to
+    self-assess — when evidence is thin or an integration was skipped."""
+    penalty = 0.0
+    if not state.sentry or state.sentry.skipped:
+        penalty += 0.1
+    if not state.appdynamics or state.appdynamics.skipped:
+        penalty += 0.1
+    if not state.code_locations:
+        penalty += 0.05
+    if len(state.threads) == 0:
+        penalty += 0.2
+    elif len(state.threads) == 1:
+        penalty += 0.05
+    return penalty
+
+
 # --- scoring + synthesis ----------------------------------------------------
 @node("severity_score", "Scoring severity")
 async def severity_score(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
@@ -802,20 +1029,176 @@ async def severity_score(_state: InvestigationState, _ctx: Any) -> dict[str, Any
 
 
 @node("synthesize", "Synthesizing the result", critical=True)
-async def synthesize(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {
-        "result": InvestigationResult(
-            severity="LOW",
-            confidence=0.0,
-            root_cause="(skeleton) agent nodes are stubs — implemented in T-21+.",
-            open_questions=["Agent node bodies are not yet implemented."],
+async def synthesize(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Single LLM call over all gathered evidence -> the result schema
+    (PLAN.md §5.2). Zero evidence never reaches the LLM: it returns a clear
+    'insufficient data' result instead of risking a fabricated guess
+    (ARCHITECTURE.md §6.7)."""
+    evidence = _evidence_from_state(state)
+    if not evidence:
+        return {
+            "result": InvestigationResult(
+                severity="LOW",
+                confidence=0.0,
+                root_cause=None,
+                open_questions=[
+                    "No evidence was gathered for this investigation — insufficient "
+                    "data to determine a root cause."
+                ],
+            ),
+            "_summary": "insufficient evidence — no LLM call made",
+        }
+
+    budget = max(500, ctx.max_tokens - _EVIDENCE_RESERVE_TOKENS)
+    evidence, dropped = _fit_evidence_budget(evidence, budget)
+
+    skip_notes: list[str] = []
+    if state.sentry and state.sentry.skipped and state.sentry.skip_reason:
+        skip_notes.append(f"Sentry: {state.sentry.skip_reason}")
+    if state.appdynamics and state.appdynamics.skipped and state.appdynamics.skip_reason:
+        skip_notes.append(f"AppDynamics: {state.appdynamics.skip_reason}")
+
+    signals = state.signals or QuerySignals(time_window_days=state.time_window_days)
+    score = state.severity_score or SeverityScore()
+
+    system_prompt = render("synthesize_system_v1.jinja2")
+    user_prompt = render(
+        "synthesize_user_v1.jinja2",
+        error_text=state.error_text,
+        signals=signals,
+        severity_score=score,
+        evidence=[e.model_dump() for e in evidence],
+        evidence_truncated=dropped or None,
+        skip_notes=skip_notes,
+        retry_note=(
+            "Note: a previous synthesis included citations the evidence did not "
+            "actually support. Only cite an evidence id whose excerpt directly "
+            "substantiates the claim next to it."
+            if state.verify_retries
+            else None
+        ),
+    )
+
+    try:
+        parsed, tokens = await _call_llm_json(ctx, system_prompt, user_prompt, SynthesizeOutput)
+    except LLMJSONError as exc:
+        raise RuntimeError(str(exc)) from exc
+
+    penalty = _confidence_penalty(state)
+    confidence = round(max(0.0, min(1.0, parsed.confidence - penalty)), 2)
+    severity = _clamp_severity(parsed.severity, score.severity)
+
+    open_questions = list(parsed.open_questions)
+    for note in skip_notes:
+        if note not in open_questions:
+            open_questions.append(note)
+    if dropped:
+        open_questions.append(
+            f"{dropped} evidence item(s) were truncated (oldest-first) to fit the "
+            f"{ctx.max_tokens}-token budget."
         )
+
+    result = InvestigationResult(
+        severity=severity,
+        severity_rationale=parsed.severity_rationale,
+        confidence=confidence,
+        root_cause=parsed.root_cause,
+        root_cause_evidence=[c.model_dump() for c in parsed.root_cause_evidence],
+        code_locations=parsed.code_locations,
+        suggested_fixes=[f.model_dump() for f in parsed.suggested_fixes],
+        third_party_involved=parsed.third_party_involved,
+        third_party_details=parsed.third_party_details,
+        open_questions=open_questions,
+    )
+    return {
+        "result": result,
+        "tokens_used": tokens,
+        "_summary": (
+            f"{severity} · confidence {confidence:.2f} · "
+            f"{len(result.root_cause_evidence)} citation(s)"
+        ),
     }
 
 
 @node("verify", "Verifying claims")
-async def verify(_state: InvestigationState, _ctx: Any) -> dict[str, Any]:
-    return {}
+async def verify(state: InvestigationState, ctx: Any) -> dict[str, Any]:
+    """Second LLM pass: check each cited claim is actually backed by the
+    evidence it names; drop unsupported claims and lower confidence
+    accordingly. When too many claims turn out unsupported, loop back to
+    `synthesize` once (ARCHITECTURE.md §6.1)."""
+    result = state.result
+    if result is None or not result.root_cause_evidence:
+        return {"verify_retry_needed": False, "_summary": "nothing to verify"}
+
+    evidence = _evidence_from_state(state)
+    known_ids = {e.id for e in evidence}
+    citations = [
+        {"ref": c.get("ref"), "excerpt": str(c.get("excerpt") or "")[:200]}
+        for c in result.root_cause_evidence
+    ]
+
+    try:
+        parsed, tokens = await _call_llm_json(
+            ctx,
+            render("verify_system_v1.jinja2"),
+            render(
+                "verify_user_v1.jinja2",
+                evidence=[e.model_dump() for e in evidence],
+                root_cause=result.root_cause or "",
+                citations=citations,
+            ),
+            VerifyOutput,
+        )
+    except LLMJSONError:
+        # Verification is best-effort: fall back to a syntactic check (the
+        # cited id must exist) rather than failing a non-critical node.
+        parsed = VerifyOutput(
+            citations=[
+                VerifyCitation(ref=str(c["ref"]), supported=c["ref"] in known_ids)
+                for c in citations
+            ]
+        )
+        tokens = 0
+
+    supported_ids = {c.ref for c in parsed.citations if c.supported and c.ref in known_ids}
+    kept = [c for c in result.root_cause_evidence if c.get("ref") in supported_ids]
+    dropped = len(result.root_cause_evidence) - len(kept)
+    drop_ratio = dropped / len(result.root_cause_evidence)
+
+    if drop_ratio > _DROP_RETRY_THRESHOLD and state.verify_retries < MAX_VERIFY_RETRIES:
+        return {
+            "verify_retries": state.verify_retries + 1,
+            "verify_retry_needed": True,
+            "tokens_used": tokens,
+            "_summary": (
+                f"{dropped}/{len(result.root_cause_evidence)} claim(s) unsupported; "
+                "retrying synthesis"
+            ),
+        }
+
+    confidence = round(max(0.0, result.confidence - 0.1 * dropped), 2)
+    open_questions = list(result.open_questions)
+    for note in parsed.notes:
+        if note not in open_questions:
+            open_questions.append(note)
+    if dropped:
+        msg = f"{dropped} claim(s) were dropped for lacking supporting evidence."
+        if msg not in open_questions:
+            open_questions.append(msg)
+
+    updated = result.model_copy(
+        update={
+            "root_cause_evidence": kept,
+            "confidence": confidence,
+            "open_questions": open_questions,
+        }
+    )
+    return {
+        "result": updated,
+        "verify_retry_needed": False,
+        "tokens_used": tokens,
+        "_summary": f"{len(kept)}/{len(result.root_cause_evidence)} claim(s) verified",
+    }
 
 
 ALL_NODES: list[GraphNode] = [

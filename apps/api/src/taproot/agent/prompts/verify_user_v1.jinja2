@@ -1,0 +1,22 @@
+## Evidence
+{% for item in evidence %}
+[{{ item.id }}] source={{ item.source }} ref={{ item.ref }}
+{{ item.excerpt }}
+
+{% endfor %}
+
+## Root cause under review
+{{ root_cause }}
+
+## Cited claims
+{% for c in citations %}
+- ref={{ c.ref }} excerpt="{{ c.excerpt }}"
+{% endfor %}
+
+## Output schema
+Respond with ONLY a single JSON object of this shape, with one entry in
+"citations" for every cited claim above, in the same order:
+{
+  "citations": [{"ref": "E<n>", "supported": true, "reason": "string"}],
+  "notes": ["string"]
+}

@@ -19,6 +19,28 @@ All notable changes to this project are documented here. Format loosely follows
 
 ### Sprint 3 — The agent (deep dive)
 
+- **T-27 Nodes 10–11: synthesize & verify** — the agent's first real LLM calls.
+  Every finding gathered so far (walked threads, third-party, Sentry, AppDynamics,
+  code locations, occurrence stats) is flattened into a numbered evidence list
+  (`agent/schemas.EvidenceItem`, `E1`, `E2`, …) and rendered through versioned
+  Jinja2 prompts in `agent/prompts/*.jinja2` (`synthesize_v1`, `verify_v1`,
+  `repair_v1` — no inline prompt strings). `synthesize` validates the model's
+  JSON against a strict schema (`SynthesizeOutput`/`EvidenceCitation`/
+  `SuggestedFix`, PLAN.md §5.2) with a 2-retry JSON-repair loop; a third invalid
+  response fails the investigation with the raw output preserved in the error
+  message — it never fabricates a result. **Zero evidence never reaches the
+  LLM**: it returns a clear "insufficient data" result instead. Severity is
+  clamped to at most one level away from the deterministic `severity_score`
+  baseline; confidence is deterministically lowered when Sentry/AppDynamics were
+  skipped, no code was located, or few threads were walked. `verify` re-checks
+  each cited claim against the evidence it names, drops unsupported claims, and
+  loops back to `synthesize` once (`state.verify_retry_needed`,
+  `ARCHITECTURE.md` §6.1) if more than half the claims turn out unsupported;
+  a `verify` LLM failure falls back to a syntactic id check rather than failing
+  the (non-critical) node. Evidence is truncated oldest-first to fit
+  `TAPROOT_AGENT_MAX_TOKENS`, recorded in `open_questions`. New `LLMPort` in
+  `agent/context.py`, wired in the worker as `RedactingLLM(LLMClient(...))` —
+  the agent never holds an unwrapped `LLM` (ARCHITECTURE.md §8.3).
 - **T-26 Node 9: occurrence_stats** (req 12.1): the 7-day chart data. Adds
   `histogram`/`cardinality` to the `ElasticSearcher` port; queries two windows so
   the week-over-week delta has a prior week, sums daily counts + distinct-user

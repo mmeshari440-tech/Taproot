@@ -7,13 +7,15 @@ maps it when persisting.
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from taproot.core.models import DayBucket, ExitCall, Frame, LogDoc
 
 SeverityLevel = Literal["BLOCKER", "HIGH", "MEDIUM", "LOW"]
+EvidenceSource = Literal["elastic", "sentry", "appdynamics", "code"]
 
 
 class QuerySignals(BaseModel):
@@ -92,3 +94,66 @@ class InvestigationResult(BaseModel):
     third_party_involved: bool = False
     third_party_details: dict[str, Any] | None = None
     open_questions: list[str] = []
+
+
+# --- synthesize / verify (T-27) ----------------------------------------------
+class EvidenceItem(BaseModel):
+    """One item of gathered evidence, given a stable id (``E1``, ``E2``, …) so the
+    LLM can cite it and ``verify`` can check the citation is real. ``ts`` is used
+    only to order thread evidence for oldest-first token-budget truncation — it
+    never reaches the prompt."""
+
+    id: str
+    source: EvidenceSource
+    ref: str
+    excerpt: str
+    ts: datetime | None = None
+
+
+class EvidenceCitation(BaseModel):
+    """A claim's supporting evidence, per the schema in ``PLAN.md`` §5.2. ``ref``
+    must be the id of an :class:`EvidenceItem` (e.g. ``"E3"``) — this is how
+    ``verify`` checks the citation is real."""
+
+    source: EvidenceSource
+    ref: str
+    excerpt: str
+
+
+class SuggestedFix(BaseModel):
+    title: str
+    description: str
+    diff: str | None = None
+    risk: Literal["LOW", "MEDIUM", "HIGH"]
+    effort: Literal["S", "M", "L"]
+
+
+class SynthesizeOutput(BaseModel):
+    """Strict validation target for the ``synthesize`` LLM call — the schema in
+    ``PLAN.md`` §5.2. A field that fails to validate (missing, wrong shape, an
+    invalid literal) triggers the JSON repair loop."""
+
+    severity: SeverityLevel
+    severity_rationale: str = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    root_cause: str = Field(min_length=1)
+    root_cause_evidence: list[EvidenceCitation] = []
+    code_locations: list[CodeLocation] = []
+    suggested_fixes: list[SuggestedFix] = []
+    third_party_involved: bool = False
+    third_party_details: dict[str, Any] | None = None
+    open_questions: list[str] = []
+
+
+class VerifyCitation(BaseModel):
+    ref: str
+    supported: bool
+    reason: str | None = None
+
+
+class VerifyOutput(BaseModel):
+    """Strict validation target for the ``verify`` LLM call: one supported/not
+    verdict per cited claim, plus any caveats worth surfacing."""
+
+    citations: list[VerifyCitation] = []
+    notes: list[str] = []
