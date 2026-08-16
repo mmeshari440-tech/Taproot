@@ -34,6 +34,7 @@ from taproot.db.models import (
 )
 from taproot.db.session import get_sessionmaker
 from taproot.integrations.gitlab import GitLabClient
+from taproot.integrations.llm import LLMClient, RedactingLLM
 from taproot.services import integration_service, project_service
 from taproot.workers.code_resolver import GitLabCodeResolver
 from taproot.workers.steps import StepRecorder
@@ -110,6 +111,7 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
         await recorder.finish(seq, node, status=StepStatus(status), summary=summary)
 
     http_client = httpx.AsyncClient(timeout=30.0)
+    llm_http_client = httpx.AsyncClient(timeout=float(settings.llm_timeout_s))
     try:
         secret_store = _build_secret_store(settings)
         project_id = investigation.project_id
@@ -134,6 +136,15 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
                     repo_refs,
                 )
 
+        llm = RedactingLLM(
+            LLMClient(
+                settings.llm_base_url,
+                settings.llm_model,
+                http_client=llm_http_client,
+                timeout=float(settings.llm_timeout_s),
+            )
+        )
+
         ctx = AgentContext(
             emit_start=emit_start,
             emit_finish=emit_finish,
@@ -143,6 +154,8 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
             sentry_clients=sentry_clients,
             appdynamics_clients=appdynamics_clients,
             code_resolver=code_resolver,
+            llm=llm,
+            max_tokens=settings.agent_max_tokens,
         )
         state = InvestigationState(
             investigation_id=investigation.id,
@@ -154,6 +167,7 @@ async def agent_runner(investigation: Investigation, recorder: StepRecorder) -> 
         await _persist_result(recorder, investigation, final)
     finally:
         await http_client.aclose()
+        await llm_http_client.aclose()
 
 
 async def execute_investigation(

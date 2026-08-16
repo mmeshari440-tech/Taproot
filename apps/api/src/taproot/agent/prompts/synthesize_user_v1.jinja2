@@ -1,0 +1,47 @@
+## Reported error
+{{ error_text }}
+
+## Extracted signals
+- Exception class: {{ signals.exception_class or "unknown" }}
+- Service hint: {{ signals.service_hint or "unknown" }}
+- Time window: {{ signals.time_window_days }} day(s)
+
+## Deterministic severity score (do not move by more than one level)
+- Score: {{ severity_score.score }}
+- Severity: {{ severity_score.severity }}
+- Breakdown: {{ severity_score.breakdown }}
+
+## Evidence
+{% for item in evidence %}
+[{{ item.id }}] source={{ item.source }} ref={{ item.ref }}
+{{ item.excerpt }}
+
+{% endfor %}
+{% if evidence_truncated %}
+Note: {{ evidence_truncated }} older evidence item(s) were dropped to fit the
+token budget. Do not cite them.
+{% endif %}
+{% if skip_notes %}
+## Degraded integrations
+{% for note in skip_notes %}
+- {{ note }}
+{% endfor %}
+{% endif %}
+{% if retry_note %}
+{{ retry_note }}
+{% endif %}
+
+## Output schema
+Respond with ONLY a single JSON object of this shape:
+{
+  "severity": "BLOCKER|HIGH|MEDIUM|LOW",
+  "severity_rationale": "string",
+  "confidence": 0.0,
+  "root_cause": "markdown string",
+  "root_cause_evidence": [{"source": "elastic|sentry|appdynamics|code", "ref": "E<n>", "excerpt": "string"}],
+  "code_locations": [{"repo": "string", "path": "string", "line": 0, "ref": "string", "snippet": "string", "why": "string"}],
+  "suggested_fixes": [{"title": "string", "description": "markdown", "diff": null, "risk": "LOW|MEDIUM|HIGH", "effort": "S|M|L"}],
+  "third_party_involved": false,
+  "third_party_details": null,
+  "open_questions": ["string"]
+}

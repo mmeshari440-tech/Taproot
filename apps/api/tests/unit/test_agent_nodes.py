@@ -6,6 +6,7 @@ config carrying the :class:`AgentContext`), the same way LangGraph invokes them.
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import uuid4
@@ -21,10 +22,18 @@ from taproot.agent.nodes import (
     occurrence_stats,
     select_threads,
     sentry_enrich,
+    synthesize,
     third_party_probe,
     thread_walk,
+    verify,
 )
-from taproot.agent.schemas import LogThread, SentryFinding
+from taproot.agent.schemas import (
+    AppDFinding,
+    InvestigationResult,
+    LogThread,
+    SentryFinding,
+    SeverityScore,
+)
 from taproot.agent.state import InvestigationState
 from taproot.core.models import (
     AppDErrorSnapshot,
@@ -37,6 +46,7 @@ from taproot.core.models import (
     SentryEventDetail,
     SentryIssue,
 )
+from taproot.integrations.llm import FakeLLM
 
 _THREAD_SUMMARY_CHARS = 400 * 4  # nodes._THREAD_SUMMARY_MAX_TOKENS * ~4 chars/token
 
@@ -91,6 +101,8 @@ def _ctx(
     sentry: list[Any] | None = None,
     appd: list[Any] | None = None,
     resolver: Any = None,
+    llm: Any = None,
+    max_tokens: int = 120_000,
 ) -> AgentContext:
     async def emit_start(_n: str, _t: str) -> int:
         return 1
@@ -106,6 +118,8 @@ def _ctx(
         sentry_clients=sentry or [],
         appdynamics_clients=appd or [],
         code_resolver=resolver,
+        llm=llm,
+        max_tokens=max_tokens,
     )
 
 
@@ -554,3 +568,217 @@ async def test_occurrence_stats_skips_without_clients() -> None:
     out = await occurrence_stats(_state(), _config(_ctx([])))
     assert out["stats"].series == []
     assert out["stats"].distinct_users == 0
+
+
+# --- synthesize / verify (T-27) ----------------------------------------------
+def _result_with_citations(*refs: str) -> InvestigationResult:
+    return InvestigationResult(
+        severity="MEDIUM",
+        confidence=0.8,
+        root_cause="cause text",
+        root_cause_evidence=[
+            {"source": "elastic", "ref": r, "excerpt": f"excerpt for {r}"} for r in refs
+        ],
+    )
+
+
+_VALID_SYNTH_JSON = json.dumps(
+    {
+        "severity": "LOW",
+        "severity_rationale": "matches baseline",
+        "confidence": 0.8,
+        "root_cause": "cause",
+        "root_cause_evidence": [],
+        "open_questions": [],
+    }
+)
+
+
+async def test_synthesize_zero_evidence_returns_insufficient_data_without_llm_call() -> None:
+    fake = FakeLLM()
+    out = await synthesize(_state(), _config(_ctx([], llm=fake)))
+    result = out["result"]
+    assert result.root_cause is None
+    assert result.confidence == 0.0
+    assert any("insufficient" in q.lower() for q in result.open_questions)
+    assert fake.received == []  # never called the LLM — no fabrication risk
+
+
+async def test_synthesize_happy_path_validates_and_persists_citations() -> None:
+    thread = LogThread(
+        txn_id="txn-1", summary="NPE while charging; partner-api returned empty body"
+    )
+    sentry = SentryFinding(issue_id="42", culprit="Pay.charge", release="deadbeef", user_count=3)
+    score = SeverityScore(score=5, severity="MEDIUM", breakdown={"users": 2})
+    state = _state(threads=[thread], sentry=sentry, severity_score=score)
+
+    response = json.dumps(
+        {
+            "severity": "MEDIUM",
+            "severity_rationale": "matches deterministic score",
+            "confidence": 0.9,
+            "root_cause": "The partner API returned an empty body, causing a NullPointerException.",
+            "root_cause_evidence": [
+                {"source": "elastic", "ref": "E1", "excerpt": "NPE while charging"},
+                {"source": "sentry", "ref": "E2", "excerpt": "culprit=Pay.charge"},
+            ],
+            "open_questions": [],
+        }
+    )
+    fake = FakeLLM([response])
+    out = await synthesize(state, _config(_ctx([], llm=fake)))
+
+    result = out["result"]
+    assert result.severity == "MEDIUM"
+    assert result.root_cause.startswith("The partner API")
+    assert [c["ref"] for c in result.root_cause_evidence] == ["E1", "E2"]
+    # penalty: appdynamics missing (0.1) + no code_locations (0.05) + 1 thread (0.05) = 0.2
+    assert result.confidence == pytest.approx(0.7)
+    assert out["tokens_used"] > 0
+    assert len(fake.received) == 1
+
+
+async def test_synthesize_truncates_evidence_oldest_first_within_token_budget() -> None:
+    old = LogThread(
+        txn_id="txn-old",
+        summary="x" * 4000,  # ~1000 tokens
+        docs=[_doc(0, "ERROR", "old", "api")],
+    )
+    new = LogThread(
+        txn_id="txn-new",
+        summary="y" * 4000,
+        docs=[_doc(0, "ERROR", "new", "api", txn="txn-new")],
+    )
+    old.docs[0].timestamp = datetime(2020, 1, 1, tzinfo=UTC)
+    new.docs[0].timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+    state = _state(threads=[old, new])
+
+    # _EVIDENCE_RESERVE_TOKENS=4000 headroom -> budget=1000, exactly one ~1000-token item.
+    ctx = _ctx([], llm=FakeLLM([_VALID_SYNTH_JSON]), max_tokens=5000)
+    out = await synthesize(state, _config(ctx))
+
+    assert out["result"].root_cause == "cause"
+    assert any("truncated" in q for q in out["result"].open_questions)
+
+
+async def test_synthesize_confidence_penalized_for_skipped_integrations() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    sentry = SentryFinding(skipped=True, skip_reason="no Sentry integration configured")
+    appd = AppDFinding(skipped=True, skip_reason="no AppDynamics integration configured")
+    state = _state(threads=[thread], sentry=sentry, appdynamics=appd)
+
+    fake = FakeLLM([_VALID_SYNTH_JSON.replace('"confidence": 0.8', '"confidence": 0.9')])
+    out = await synthesize(state, _config(_ctx([], llm=fake)))
+    result = out["result"]
+    # penalty: sentry (0.1) + appd (0.1) skipped, no code_locations (0.05), 1 thread (0.05) = 0.3
+    assert result.confidence == pytest.approx(0.6)
+    assert any("Sentry" in q for q in result.open_questions)
+    assert any("AppDynamics" in q for q in result.open_questions)
+
+
+async def test_synthesize_clamps_severity_to_one_level_above_baseline() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    score = SeverityScore(score=1, severity="LOW", breakdown={})
+    state = _state(threads=[thread], severity_score=score)
+
+    response = json.dumps(
+        {
+            "severity": "BLOCKER",
+            "severity_rationale": "escalating",
+            "confidence": 0.5,
+            "root_cause": "root cause text",
+            "root_cause_evidence": [],
+            "open_questions": [],
+        }
+    )
+    fake = FakeLLM([response])
+    out = await synthesize(state, _config(_ctx([], llm=fake)))
+    assert out["result"].severity == "MEDIUM"  # clamped from BLOCKER to LOW + 1
+
+
+async def test_synthesize_repairs_invalid_json_then_succeeds() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    state = _state(threads=[thread])
+    fake = FakeLLM(["not json at all", _VALID_SYNTH_JSON])
+    out = await synthesize(state, _config(_ctx([], llm=fake)))
+    assert out["result"].root_cause == "cause"
+    assert len(fake.received) == 2
+    assert len(fake.received[1]) == 4  # system, user, assistant(bad), user(repair)
+
+
+async def test_synthesize_fails_after_exhausting_repair_attempts() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    state = _state(threads=[thread])
+    fake = FakeLLM(["bad1", "bad2", "bad3"])
+    with pytest.raises(RuntimeError) as exc_info:
+        await synthesize(state, _config(_ctx([], llm=fake)))
+    assert "bad3" in str(exc_info.value)  # raw output stored, never silently dropped
+    assert len(fake.received) == 3  # initial + 2 repairs, then fail
+
+
+async def test_verify_skips_when_no_citations() -> None:
+    state = _state(result=InvestigationResult(severity="LOW", confidence=0.0, root_cause=None))
+    fake = FakeLLM()
+    out = await verify(state, _config(_ctx([], llm=fake)))
+    assert out == {"verify_retry_needed": False}
+    assert fake.received == []
+
+
+async def test_verify_drops_unsupported_and_lowers_confidence() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    sentry = SentryFinding(issue_id="42", culprit="Pay.charge")
+    state = _state(threads=[thread], sentry=sentry, result=_result_with_citations("E1", "E2"))
+
+    response = json.dumps(
+        {
+            "citations": [
+                {"ref": "E1", "supported": True, "reason": "matches"},
+                {"ref": "E2", "supported": False, "reason": "not substantiated"},
+            ],
+            "notes": ["Sentry evidence was inconclusive."],
+        }
+    )
+    fake = FakeLLM([response])
+    out = await verify(state, _config(_ctx([], llm=fake)))
+
+    updated = out["result"]
+    assert [c["ref"] for c in updated.root_cause_evidence] == ["E1"]
+    assert updated.confidence == pytest.approx(0.7)  # 0.8 - 0.1 * 1 dropped
+    assert "Sentry evidence was inconclusive." in updated.open_questions
+    assert any("dropped" in q for q in updated.open_questions)
+    assert out["verify_retry_needed"] is False
+
+
+async def test_verify_retries_synthesis_when_most_claims_unsupported() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    state = _state(threads=[thread], result=_result_with_citations("E1"), verify_retries=0)
+
+    response = json.dumps({"citations": [{"ref": "E1", "supported": False}], "notes": []})
+    fake = FakeLLM([response])
+    out = await verify(state, _config(_ctx([], llm=fake)))
+
+    assert out["verify_retry_needed"] is True
+    assert out["verify_retries"] == 1
+    assert "result" not in out  # leave the prior result for synthesize to overwrite
+
+
+async def test_verify_finalizes_after_retry_budget_exhausted() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    state = _state(threads=[thread], result=_result_with_citations("E1"), verify_retries=1)
+
+    response = json.dumps({"citations": [{"ref": "E1", "supported": False}], "notes": []})
+    fake = FakeLLM([response])
+    out = await verify(state, _config(_ctx([], llm=fake)))
+
+    assert out["verify_retry_needed"] is False
+    assert out["result"].root_cause_evidence == []
+
+
+async def test_verify_falls_back_to_syntactic_check_when_llm_fails() -> None:
+    thread = LogThread(txn_id="txn-1", summary="boom")
+    state = _state(threads=[thread], result=_result_with_citations("E1", "E-missing"))
+    fake = FakeLLM(["not json", "still not json", "nope"])
+    out = await verify(state, _config(_ctx([], llm=fake)))
+
+    updated = out["result"]
+    assert [c["ref"] for c in updated.root_cause_evidence] == ["E1"]  # E-missing isn't a real id

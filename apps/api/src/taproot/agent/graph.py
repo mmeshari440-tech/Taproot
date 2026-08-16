@@ -17,14 +17,11 @@ from taproot.agent import nodes
 from taproot.agent.context import CONFIG_KEY, AgentContext
 from taproot.agent.state import InvestigationState
 
-_MAX_VERIFY_RETRIES = 1
-
 
 def _route_after_verify(state: InvestigationState) -> str:
-    # Stub always ends; T-27 loops back to synthesize when too many claims are dropped.
-    if state.verify_retries < 0:  # placeholder condition, never true in the skeleton
-        return "retry"  # pragma: no cover
-    return "end"
+    # `verify` (T-27) only sets this when too many claims were unsupported and
+    # the retry budget (nodes.MAX_VERIFY_RETRIES) isn't exhausted yet.
+    return "retry" if state.verify_retry_needed else "end"
 
 
 def _route_after_broad(state: InvestigationState) -> str:

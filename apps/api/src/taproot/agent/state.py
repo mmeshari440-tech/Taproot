@@ -61,3 +61,6 @@ class InvestigationState(BaseModel):
     node_errors: Annotated[dict[str, str], merge_errors] = {}
     tokens_used: Annotated[int, operator.add] = 0
     verify_retries: int = 0
+    # set by `verify` when too many claims were unsupported; read by the
+    # verify -> synthesize routing edge (graph.py `_route_after_verify`).
+    verify_retry_needed: bool = False

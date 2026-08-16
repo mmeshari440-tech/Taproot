@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from uuid import uuid4
 
 import pytest
@@ -19,6 +20,24 @@ from taproot.core.models import (
     RepoRef,
     SentryEventDetail,
     SentryIssue,
+)
+from taproot.integrations.llm import FakeLLM
+
+# Scripted so `synthesize` -> `verify` both get valid JSON on the first try;
+# "E1" is always the id of the first thread's evidence (thread_walk runs before
+# any other evidence-producing node).
+_SYNTH_RESPONSE = json.dumps(
+    {
+        "severity": "LOW",
+        "severity_rationale": "matches the deterministic baseline",
+        "confidence": 0.8,
+        "root_cause": "NullPointerException while processing the transaction.",
+        "root_cause_evidence": [{"source": "elastic", "ref": "E1", "excerpt": "boom"}],
+        "open_questions": [],
+    }
+)
+_VERIFY_RESPONSE = json.dumps(
+    {"citations": [{"ref": "E1", "supported": True, "reason": "matches"}], "notes": []}
 )
 
 
@@ -112,6 +131,9 @@ class _Recorder:
             sentry_clients=[_FakeSentry()] if with_clients else [],
             appdynamics_clients=[_FakeAppD()] if with_clients else [],
             code_resolver=_FakeResolver() if with_clients else None,
+            # Evidence only exists when `with_clients=True`; the no-evidence path
+            # short-circuits synthesize without ever calling the LLM.
+            llm=FakeLLM([_SYNTH_RESPONSE, _VERIFY_RESPONSE]) if with_clients else None,
         )
 
     def started(self) -> set[str]:

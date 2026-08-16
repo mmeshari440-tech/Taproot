@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from langchain_core.runnables import RunnableConfig
 
@@ -18,6 +18,8 @@ from taproot.core.models import (
     AppDErrorSnapshot,
     BroadSearchResult,
     DayBucket,
+    LLMMessage,
+    LLMResponse,
     LogDoc,
     RepoRef,
     SentryEventDetail,
@@ -75,6 +77,23 @@ class CodeResolver(Protocol):
     async def fetch_file(self, gitlab_project_id: int, path: str, ref: str) -> str | None: ...
 
 
+@runtime_checkable
+class LLMPort(Protocol):
+    """Port for the LLM boundary (T-27), used by ``synthesize``/``verify``.
+    Structurally satisfied by ``RedactingLLM`` — the agent never holds an
+    unwrapped ``LLM``, so there is no redaction bypass (ARCHITECTURE.md §8.3)."""
+
+    async def complete(
+        self,
+        messages: list[LLMMessage],
+        *,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> LLMResponse: ...
+
+
 @dataclass
 class AgentContext:
     emit_start: EmitStart
@@ -90,6 +109,9 @@ class AgentContext:
     appdynamics_clients: Sequence[AppDynamicsProbe] = ()
     # Optional: absent when the project has no GitLab access (code_locate skips).
     code_resolver: CodeResolver | None = None
+    # The redaction-wrapped LLM client (T-27: synthesize + verify).
+    llm: LLMPort | None = None
+    max_tokens: int = 120_000
 
 
 CONFIG_KEY = "ctx"
